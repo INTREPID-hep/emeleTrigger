@@ -1,0 +1,28 @@
+model_type: "SAGE"
+hidden_dim: 32
+dropout: 0.2
+normalization: "NodesAndEdges"
+
+batch_size: 32
+learning_rate: 0.001
+weight_decay: 0.0
+epochs: 10
+earlystop: 4
+
+train_ratio: 0.70
+val_ratio: 0.15
+threshold: 0.5
+pos_weight: "auto"
+seed: 42
+
+device: "cpu"
+
+graph_path: "./datasets/"
+graph_name: "l1nano_dataaset_5k.pt"
+out_model_path: "./results_edge_cls_quick"
+save_tag: "edge_cls_quick"
+
+num_files: 1
+do_train: true
+do_validation: true
+do_test: true

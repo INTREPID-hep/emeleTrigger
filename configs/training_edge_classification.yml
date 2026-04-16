@@ -1,0 +1,29 @@
+model_type: "SAGE"
+hidden_dim: 64
+dropout: 0.2
+normalization: "NodesAndEdges"
+
+batch_size: 64
+learning_rate: 0.001
+weight_decay: 0.0001
+epochs: 50
+earlystop: 10
+
+train_ratio: 0.70
+val_ratio: 0.15
+threshold: 0.5
+pos_weight: "auto"
+seed: 42
+
+task: "edge_classification"
+device: "cuda"
+
+graph_path: "./datasets/"
+graph_name: "l1nano_dataaset_5k.pt"
+out_model_path: "./results_edge_cls"
+save_tag: "edge_cls_l1nano_5k"
+
+num_files: 1
+do_train: true
+do_validation: true
+do_test: true

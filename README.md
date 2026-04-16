@@ -122,6 +122,44 @@ This script processes one event and creates:
 - `stub_and_edge_info_event_0.png`: Distribution plots for stub features and edge attributes
 - `graph_event_0.png`: Graph visualization for the first event
 
+#### 5. Check Raw L1Nano Input Variables
+
+To reproduce the variable checks done in the notebook directly from the plotting tools, use:
+
+```bash
+python tools/plotter/draw_variables.py \
+  --mode l1nano \
+  --ifile /path/to/file.root /path/to/file2.root \
+  --tree Events \
+  --ofolder output/l1nano_inputs/ \
+  --max-events 100
+```
+
+If more than one ROOT file is passed, the script loads them all, merges the selected events, and produces a single combined set of plots.
+
+This produces:
+- `gen_muon_summary.png`: GenPart muon kinematics and displacement summary, using the same selection as the notebook.
+- `stub_features_all.png`: All numeric `stub_*` inputs.
+- `stub_features_qual1.png`: CSC-only stub inputs (`qual == 1`).
+- `stub_features_qual2.png`: RPC-only stub inputs (`qual == 2`).
+- `stub_features_qual3_endcap.png`: `qual == 3` stub inputs restricted to endcap stubs.
+
+You can also use the wrapper script:
+
+```bash
+./tools/plotter/run_l1nano_input_plots.sh <root_file> <out_dir> <max_events> <tree_name>
+```
+
+Example:
+
+```bash
+./tools/plotter/run_l1nano_input_plots.sh \
+  /path/to/file.root \
+  output/l1nano_inputs \
+  500 \
+  Events
+```
+
 ### Dataset Structure
 
 Each graph in the dataset is a `torch_geometric.data.Data` object with:

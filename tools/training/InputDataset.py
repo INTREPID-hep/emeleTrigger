@@ -50,11 +50,10 @@ class L1NanoDataset(Dataset):
         
         # Definir features de stubs y GenPart
         self.stub_vars     = kwargs.get("stub_vars", [
-            'eta1', 'eta2', 'phi1', 'phi2', 'qual', 'type', 
-            'depthregion', 'etaregion', 'phiregion', 'tfLayer', 'etaqual'
+            'tfLayer', 'offeta1', 'offphi1'
         ])
         self.genpart_vars  = kwargs.get("genpart_vars", [
-            'pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY'
+            'pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2'
         ])
         
         self.dR_threshold  = kwargs.get("dR_threshold", 0.15)
@@ -62,6 +61,8 @@ class L1NanoDataset(Dataset):
         self.max_files     = kwargs.get("max_files", None)
         self.max_events    = kwargs.get("max_events", None)
         self.debug         = kwargs.get("debug", False)
+        self.edge_deta_threshold = kwargs.get("edge_deta_threshold", 0.5)
+        self.edge_dphi_threshold = kwargs.get("edge_dphi_threshold", 1.0)
         self.pre_transform = kwargs.get("pre_transform")
         self.transform     = kwargs.get("transform")
 
@@ -84,6 +85,11 @@ class L1NanoDataset(Dataset):
         data_list = []
         files_processed = 0
         events_processed = 0
+        events_seen = 0
+        events_skipped_no_stubs = 0
+        events_skipped_no_edges = 0
+        events_skipped_nan = 0
+        events_skipped_pretransform = 0
 
         # Check if root_dir is a directory or a file
         if os.path.isdir(self.root_dir):
@@ -119,10 +125,11 @@ class L1NanoDataset(Dataset):
                 print(f"  Found {num_events} events in file")
                 
                 for event_idx in range(num_events):
-                    if self.max_events is not None and events_processed >= self.max_events:
+                    if self.max_events is not None and self.max_events >= 0 and events_processed >= self.max_events:
                         break
                     
                     event = events_data[event_idx]
+                    events_seen += 1
                     
                     # Extract stub features
                     stub_features = self._extract_stub_features(event)
@@ -130,29 +137,43 @@ class L1NanoDataset(Dataset):
                     # Extract GenPart features (muons only)
                     genpart_features = self._extract_genpart_features(event)
                     
+                    # Matching labels following TrainL1Nano_v2.ipynb logic
+                    stub_labels, stub_deltaR, stub_matched_muon_idx = self._match_stubs_to_genpart(event)
+                    
                     # Skip events with no stubs
                     if stub_features.shape[0] == 0:
+                        events_skipped_no_stubs += 1
                         continue
                     
-                    # Create edges between stubs (by tfLayer)
-                    edge_index, edge_attr = self._create_edges_by_layer(stub_features)
-                    
-                    # Match stubs to gen muons
-                    stub_labels = self._match_stubs_to_genpart(event)
-                    
-                    # Create graph data
-                    graph_data = Data(
-                        x=stub_features,
-                        edge_index=edge_index,
-                        edge_attr=edge_attr,
-                        y=stub_labels,
-                        genpart_features=genpart_features
+                    # Build graph with notebook-like logic (valid labels + edges)
+                    graph_data = self._build_graph_for_event(
+                        stub_features,
+                        stub_labels,
+                        stub_deltaR,
+                        stub_matched_muon_idx,
+                        genpart_features,
                     )
+
+                    if graph_data is None:
+                        events_skipped_pretransform += 1
+                        continue
+                    
+                    if graph_data.edge_index.size(1) == 0:
+                        events_skipped_no_edges += 1
+
+                    has_nan = (
+                        torch.isnan(graph_data.x).any() or
+                        (graph_data.edge_attr is not None and torch.isnan(graph_data.edge_attr).any()) or
+                        (graph_data.y is not None and torch.is_floating_point(graph_data.y) and torch.isnan(graph_data.y).any())
+                    )
+                    if has_nan:
+                        events_skipped_nan += 1
                     
                     # Apply pre-transform if provided
                     if self.pre_transform is not None:
                         graph_data = self.pre_transform(graph_data)
                         if graph_data is None:
+                            events_skipped_pretransform += 1
                             continue
                     
                     data_list.append(graph_data)
@@ -169,6 +190,13 @@ class L1NanoDataset(Dataset):
                 continue
         
         print(f"\nTotal events loaded: {len(data_list)}")
+        if self.debug:
+            print("Dataset debug summary:")
+            print(f"  events seen              : {events_seen}")
+            print(f"  skipped (no stubs)       : {events_skipped_no_stubs}")
+            print(f"  skipped (no edges)       : {events_skipped_no_edges}")
+            print(f"  skipped (NaN)            : {events_skipped_nan}")
+            print(f"  skipped (pre_transform)  : {events_skipped_pretransform}")
         return data_list
 
     def _extract_stub_features(self, event):
@@ -176,7 +204,7 @@ class L1NanoDataset(Dataset):
         Extract stub features as tensor [num_stubs, num_features].
         """
         # Access stub arrays directly from event.stub
-        num_stubs = len(event.stub.eta1) if hasattr(event.stub, 'eta1') else 0
+        num_stubs = len(event.stub.offeta1) if hasattr(event.stub, 'offeta1') else 0
         
         if num_stubs == 0:
             return torch.zeros((0, len(self.stub_vars)), dtype=torch.float32)
@@ -185,7 +213,7 @@ class L1NanoDataset(Dataset):
         for feat in self.stub_vars:
             if hasattr(event.stub, feat):
                 feat_array = getattr(event.stub, feat)
-                feat_tensor = torch.tensor(ak.to_numpy(feat_array), dtype=torch.float32)
+                feat_tensor = torch.tensor(self._ak_to_numpy_safe(feat_array), dtype=torch.float32)
             else:
                 feat_tensor = torch.zeros(num_stubs, dtype=torch.float32)
             features.append(feat_tensor)
@@ -210,6 +238,12 @@ class L1NanoDataset(Dataset):
             statusFlags = event.GenPart.statusFlags
             mask_lastcopy = (statusFlags & (1 << 13)) != 0
             mask_muons = mask_muons & mask_lastcopy
+
+        if hasattr(event.GenPart, 'pt'):
+            mask_muons = mask_muons & (event.GenPart.pt > 1)
+
+        if hasattr(event.GenPart, 'etaSt2'):
+            mask_muons = mask_muons & (event.GenPart.etaSt2 > -999)
         
         if ak.sum(mask_muons) == 0:
             return torch.zeros((0, len(self.genpart_vars)), dtype=torch.float32)
@@ -218,7 +252,7 @@ class L1NanoDataset(Dataset):
         for feat in self.genpart_vars:
             if hasattr(event.GenPart, feat):
                 feat_array = getattr(event.GenPart, feat)[mask_muons]
-                feat_tensor = torch.tensor(ak.to_numpy(feat_array), dtype=torch.float32)
+                feat_tensor = torch.tensor(self._ak_to_numpy_safe(feat_array), dtype=torch.float32)
             else:
                 num_muons = ak.sum(mask_muons)
                 feat_tensor = torch.zeros(num_muons, dtype=torch.float32)
@@ -229,79 +263,151 @@ class L1NanoDataset(Dataset):
     
     def _match_stubs_to_genpart(self, event):
         """
-        Perform geometric matching between stubs and gen muons using dR.
-        Returns tensor of shape [num_stubs] with muon index (or -1 if no match).
+        Matching logic mimicking TrainL1Nano_v2.ipynb.
+        Returns:
+            - labels: 1 (matched), 0 (no match), -1 (no muons in event)
+            - deltaR: minimum dR for each stub
+            - matched indices: index of matched muon in the event-level filtered list
         """
-        # Use offeta1/offphi1 if available, otherwise eta1/phi1
-        stub_eta = event.stub.offeta1 if hasattr(event.stub, 'offeta1') else event.stub.eta1
-        stub_phi = event.stub.offphi1 if hasattr(event.stub, 'offphi1') else event.stub.phi1
+        # Use offeta1/offphi1 as in notebook
+        if not hasattr(event.stub, 'offeta1') or not hasattr(event.stub, 'offphi1'):
+            num_stubs = len(event.stub.eta1) if hasattr(event.stub, 'eta1') else 0
+            return (
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+                torch.full((num_stubs,), 999.0, dtype=torch.float32),
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+            )
+
+        stub_eta = self._ak_to_numpy_safe(event.stub.offeta1)
+        stub_phi = self._ak_to_numpy_safe(event.stub.offphi1)
         
         num_stubs = len(stub_eta)
         
         # Get gen muons
         pdgIds = event.GenPart.pdgId if hasattr(event.GenPart, 'pdgId') else []
         if len(pdgIds) == 0:
-            return torch.full((num_stubs,), -1, dtype=torch.long)
+            return (
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+                torch.full((num_stubs,), 999.0, dtype=torch.float32),
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+            )
         
         mask_muons = abs(pdgIds) == 13
         if hasattr(event.GenPart, 'statusFlags'):
             statusFlags = event.GenPart.statusFlags
             mask_lastcopy = (statusFlags & (1 << 13)) != 0
             mask_muons = mask_muons & mask_lastcopy
+
+        if hasattr(event.GenPart, 'pt'):
+            mask_muons = mask_muons & (event.GenPart.pt > 1)
+
+        if hasattr(event.GenPart, 'etaSt2'):
+            mask_muons = mask_muons & (event.GenPart.etaSt2 > -999)
         
         if ak.sum(mask_muons) == 0:
-            return torch.full((num_stubs,), -1, dtype=torch.long)
+            return (
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+                torch.full((num_stubs,), 999.0, dtype=torch.float32),
+                torch.full((num_stubs,), -1, dtype=torch.float32),
+            )
         
-        muon_eta = ak.to_numpy(event.GenPart.eta[mask_muons])
-        muon_phi = ak.to_numpy(event.GenPart.phi[mask_muons])
-        
-        stub_eta_np = ak.to_numpy(stub_eta)
-        stub_phi_np = ak.to_numpy(stub_phi)
-        
-        matched_indices = np.full(num_stubs, -1, dtype=np.int64)
+        if hasattr(event.GenPart, 'etaSt2') and hasattr(event.GenPart, 'phiSt2'):
+            muon_eta = self._ak_to_numpy_safe(event.GenPart.etaSt2[mask_muons])
+            muon_phi = self._ak_to_numpy_safe(event.GenPart.phiSt2[mask_muons])
+        else:
+            muon_eta = self._ak_to_numpy_safe(event.GenPart.eta[mask_muons])
+            muon_phi = self._ak_to_numpy_safe(event.GenPart.phi[mask_muons])
+
+        labels = np.full(num_stubs, -1, dtype=np.float32)
+        min_deltaR = np.full(num_stubs, 999.0, dtype=np.float32)
+        matched_indices = np.full(num_stubs, -1, dtype=np.float32)
         
         for i in range(num_stubs):
             min_dR = float('inf')
             matched_idx = -1
             
             for j in range(len(muon_eta)):
-                deta = stub_eta_np[i] - muon_eta[j]
-                dphi = stub_phi_np[i] - muon_phi[j]
-                
-                # Normalize dphi to [-pi, pi]
-                while dphi > np.pi:
-                    dphi -= 2*np.pi
-                while dphi < -np.pi:
-                    dphi += 2*np.pi
+                deta = stub_eta[i] - muon_eta[j]
+                dphi = self._deltaphi(stub_phi[i], muon_phi[j])
                 
                 dR = np.sqrt(deta**2 + dphi**2)
                 
-                if dR < min_dR and dR < self.dR_threshold:
+                if dR < min_dR:
                     min_dR = dR
                     matched_idx = j
-            
-            matched_indices[i] = matched_idx
-        
-        return torch.tensor(matched_indices, dtype=torch.long)
+            if min_dR < self.dR_threshold:
+                labels[i] = 1.0
+                min_deltaR[i] = min_dR
+                matched_indices[i] = float(matched_idx)
+            else:
+                labels[i] = 0.0
+                min_deltaR[i] = min_dR
+
+        return (
+            torch.tensor(labels, dtype=torch.float32),
+            torch.tensor(min_deltaR, dtype=torch.float32),
+            torch.tensor(matched_indices, dtype=torch.float32),
+        )
+
+    def _build_graph_for_event(self, stub_features, stub_labels, stub_deltaR, stub_matched_idx, genpart_features):
+        # Keep only stubs with defined label (>=0), as in notebook
+        valid_mask = stub_labels >= 0
+        if valid_mask.sum() == 0:
+            return None
+
+        x_full = torch.cat(
+            [
+                stub_features,
+                stub_labels.unsqueeze(1),
+                stub_deltaR.unsqueeze(1),
+                stub_matched_idx.unsqueeze(1),
+            ],
+            dim=1,
+        )
+        x_full = x_full[valid_mask]
+
+        nodes = x_full[:, :3]  # tfLayer, offeta1, offphi1
+        node_labels = x_full[:, 3].clone()  # 1/0 labels
+        matched_idx = x_full[:, 5].clone()  # matched muon indices
+
+        edge_index, edge_attr, edge_y = self._create_edges_by_layer(nodes, matched_idx)
+
+        return Data(
+            x=nodes,
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            edge_y=edge_y,
+            y=node_labels,
+            genpart_features=genpart_features,
+            num_nodes=nodes.shape[0],
+        )
     
-    def _create_edges_by_layer(self, stub_features):
+    def _create_edges_by_layer(self, node_features, matched_idx):
         """
-        Create edges connecting stubs between consecutive tfLayer.
-        stub_features: tensor [num_stubs, num_features]
-        tfLayer is feature index 9.
+        Create edges mimicking TrainL1Nano_v2.ipynb logic:
+          - connect between consecutive layers
+          - if a node is not connected to next layer, try the subsequent layer
+          - connect when abs(deta) < 0.5 and abs(dphi) < 1.0
+          - edge label = 1 if both stubs are matched to the same muon index (>=0)
         """
-        num_stubs = stub_features.shape[0]
+        num_stubs = node_features.shape[0]
         
         if num_stubs == 0:
-            return torch.zeros((2, 0), dtype=torch.long), torch.zeros((0, 3), dtype=torch.float32)
+            return (
+                torch.zeros((2, 0), dtype=torch.long),
+                torch.zeros((0, 2), dtype=torch.float32),
+                torch.zeros((0,), dtype=torch.float32),
+            )
         
-        # Get tfLayer (feature index 9)
-        tflayer = stub_features[:, 9].numpy()
-        eta = stub_features[:, 0].numpy()
-        phi = stub_features[:, 2].numpy()
+        # node features are [tfLayer, offeta1, offphi1]
+        tflayer = node_features[:, 0].numpy()
+        eta = node_features[:, 1].numpy()
+        phi = node_features[:, 2].numpy()
+        matched_np = matched_idx.numpy()
         
         edge_index = []
         edge_attr = []
+        edge_labels = []
         
         unique_layers = np.unique(tflayer)
         
@@ -309,38 +415,63 @@ class L1NanoDataset(Dataset):
         for layer_idx in range(len(unique_layers) - 1):
             current_layer = unique_layers[layer_idx]
             next_layer = unique_layers[layer_idx + 1]
+            next_next_layer = unique_layers[layer_idx + 2] if layer_idx + 2 < len(unique_layers) else None
             
             current_indices = np.where(tflayer == current_layer)[0]
             next_indices = np.where(tflayer == next_layer)[0]
+            next_next_indices = np.where(tflayer == next_next_layer)[0] if next_next_layer is not None else np.array([], dtype=int)
             
-            # Connect stubs within dR_threshold
+            # Connect stubs in next layer first, then fallback to next-next layer
             for i in current_indices:
+                connected_to_next = False
                 for j in next_indices:
                     deta = eta[i] - eta[j]
-                    dphi = phi[i] - phi[j]
-                    
-                    # Normalize dphi
-                    while dphi > np.pi:
-                        dphi -= 2 * np.pi
-                    while dphi < -np.pi:
-                        dphi += 2 * np.pi
-                    
-                    dR = np.sqrt(deta**2 + dphi**2)
-                    
-                    if dR < 0.3:  # dR threshold for edges
+                    dphi = self._deltaphi(phi[i], phi[j])
+
+                    if abs(deta) < self.edge_deta_threshold and abs(dphi) < self.edge_dphi_threshold:
                         edge_index.append([i, j])
-                        edge_index.append([j, i])  # undirected
-                        edge_attr.append([deta, dphi, dR])
-                        edge_attr.append([deta, dphi, dR])
+                        edge_attr.append([deta, dphi])
+                        same_muon = matched_np[i] >= 0 and matched_np[j] >= 0 and matched_np[i] == matched_np[j]
+                        edge_labels.append(1.0 if same_muon else 0.0)
+                        connected_to_next = True
+
+                if (not connected_to_next) and len(next_next_indices) > 0:
+                    for k in next_next_indices:
+                        deta = eta[i] - eta[k]
+                        dphi = self._deltaphi(phi[i], phi[k])
+
+                        if abs(deta) < self.edge_deta_threshold and abs(dphi) < self.edge_dphi_threshold:
+                            edge_index.append([i, k])
+                            edge_attr.append([deta, dphi])
+                            same_muon = matched_np[i] >= 0 and matched_np[k] >= 0 and matched_np[i] == matched_np[k]
+                            edge_labels.append(1.0 if same_muon else 0.0)
         
         if len(edge_index) == 0:
-            edge_index = torch.zeros((2, 0), dtype=torch.long)
-            edge_attr = torch.zeros((0, 3), dtype=torch.float32)
+            edge_index_t = torch.zeros((2, 0), dtype=torch.long)
+            edge_attr_t = torch.zeros((0, 2), dtype=torch.float32)
+            edge_y_t = torch.zeros((0,), dtype=torch.float32)
         else:
-            edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-            edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
+            edge_index_t = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+            edge_attr_t = torch.tensor(edge_attr, dtype=torch.float32)
+            edge_y_t = torch.tensor(edge_labels, dtype=torch.float32)
         
-        return edge_index, edge_attr
+        return edge_index_t, edge_attr_t, edge_y_t
+
+    @staticmethod
+    def _deltaphi(phi1, phi2):
+        dphi = phi1 - phi2
+        while dphi > np.pi:
+            dphi -= 2 * np.pi
+        while dphi < -np.pi:
+            dphi += 2 * np.pi
+        return dphi
+        
+    @staticmethod
+    def _ak_to_numpy_safe(values):
+        try:
+            return ak.to_numpy(values)
+        except Exception:
+            return np.asarray(ak.to_list(values), dtype=np.float32)
     
 
     def len(self):
@@ -465,12 +596,14 @@ def main():
     parser.add_argument('--root_dir', type=str, required=True, help='Directory containing the ROOT files or path to a single ROOT file')
     parser.add_argument('--tree_name', type=str, default="Events", help='Name of the tree inside the ROOT files')
     parser.add_argument('--stub_vars', nargs='+', type=str, 
-                        default=['eta1', 'eta2', 'phi1', 'phi2', 'qual', 'type', 'depthregion', 'etaregion', 'phiregion', 'tfLayer', 'etaqual'],
+                        default=['tfLayer', 'offeta1', 'offphi1'],
                         help='List of stub variables to extract')
     parser.add_argument('--genpart_vars', nargs='+', type=str,
-                        default=['pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY'],
+                        default=['pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2'],
                         help='List of GenPart variables to extract')
     parser.add_argument('--dR_threshold', type=float, default=0.15, help='dR threshold for stub-muon matching')
+    parser.add_argument('--edge_deta_threshold', type=float, default=0.5, help='abs(deta) threshold for edge building')
+    parser.add_argument('--edge_dphi_threshold', type=float, default=1.0, help='abs(dphi) threshold for edge building')
     parser.add_argument('--task', type=str, default='classification', help='Task type (classification or regression)')
     parser.add_argument('--plot_example', action='store_true', help='Plot an example graph')
     parser.add_argument('--save_path', type=str, help='Path to save the dataset')
@@ -488,6 +621,11 @@ def main():
 
         if args.save_path:
             dataset.save_dataset(args.save_path)
+
+    if len(dataset) == 0:
+        print("Dataset loaded with 0 events")
+        print("No se puede crear DataLoader con dataset vacío. Revisa el resumen debug para ver por qué se filtraron los eventos.")
+        return
 
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
