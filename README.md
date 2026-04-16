@@ -19,6 +19,9 @@ source /cvmfs/sft.cern.ch/lcg/views/LCG_106_cuda/x86_64-el9-gcc11-opt/setup.sh
 
 The `L1NanoDataset` class processes L1 Trigger NanoAOD ROOT files and converts them into PyTorch Geometric graph datasets suitable for GNN training. Each event is converted into one or more graphs representing the stub-muon matching problem.
 
+> [!TIP]
+> last production of L1Nano datasets (`/lustre/ific.uv.es/ml/uovi156/data/prod/`) was supported by previously definning the branchs name mapping in a YAML file, see `configs/prod.yaml`. So, just add `--config configs/prod.yaml` to the dataset generation command.
+
 ### Quick Start
 
 #### 1. Generate a Dataset from L1Nano ROOT Files

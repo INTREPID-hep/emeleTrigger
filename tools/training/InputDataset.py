@@ -1,6 +1,7 @@
 import os
 import uproot
 import torch
+import warnings
 from torch_geometric.data import Dataset, Data
 import awkward as ak
 import networkx as nx
@@ -36,6 +37,12 @@ class L1NanoDataset(Dataset):
             debug (bool): Modo debug.
             pre_transform (callable): Función de pre-transformación.
             transform (callable): Función de transformación (opcional).
+
+        Configuración flexible de ramas:
+        - stub_prefix/genpart_prefix: prefijos reales en el ROOT file.
+        - stub_vars/genpart_vars: lista (modo legacy) o diccionario
+            {nombre_canónico: nombre_real_sin_prefijo}.
+        - El código sigue usando nombres canónicos y se resuelve con aliases.
         """
         config_file = kwargs.get("config")
         if config_file is not None:
@@ -47,14 +54,26 @@ class L1NanoDataset(Dataset):
 
         self.root_dir      = kwargs.get("root_dir")
         self.tree_name     = kwargs.get("tree_name", "Events")
+        self.stub_prefix   = kwargs.get("stub_prefix", "stub_")
+        self.genpart_prefix = kwargs.get("genpart_prefix", "GenPart_")
         
         # Definir features de stubs y GenPart
-        self.stub_vars     = kwargs.get("stub_vars", [
+        default_stub_vars = [
             'tfLayer', 'offeta1', 'offphi1'
-        ])
-        self.genpart_vars  = kwargs.get("genpart_vars", [
-            'pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2'
-        ])
+        ]
+        default_genpart_vars = [
+            'pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2', 'statusFlags'
+        ]
+
+        self.stub_var_map = self._normalize_var_map(
+            kwargs.get("stub_vars", default_stub_vars)
+        )
+        self.genpart_var_map = self._normalize_var_map(
+            kwargs.get("genpart_vars", default_genpart_vars)
+        )
+
+        self.stub_vars = list(self.stub_var_map.keys())
+        self.genpart_vars = list(self.genpart_var_map.keys())
         
         self.dR_threshold  = kwargs.get("dR_threshold", 0.15)
         self.task          = kwargs.get("task", "classification")  # classification or regression
@@ -99,11 +118,39 @@ class L1NanoDataset(Dataset):
         else:
             raise ValueError(f"{self.root_dir} is not a valid directory or ROOT file")
 
-        # Define branches to load
+        # Define canonical branches and resolve to real branch names through aliases.
         stub_branches = [f"stub_{var}" for var in self.stub_vars]
         genpart_branches = [f"GenPart_{var}" for var in self.genpart_vars]
-        all_branches = stub_branches + genpart_branches + ['GenPart_statusFlags']
-        
+        all_branches = stub_branches + genpart_branches
+
+        # Full mapping canonical -> real source branch
+        canonical_to_source = {
+            **{
+                f"stub_{canonical}": f"{self.stub_prefix}{source_name}"
+                for canonical, source_name in self.stub_var_map.items()
+            },
+            **{
+                f"GenPart_{canonical}": f"{self.genpart_prefix}{source_name}"
+                for canonical, source_name in self.genpart_var_map.items()
+            },
+        }
+
+        # remove entries where canonical name == source name (no alias needed)
+        aliases = {
+            canonical: source
+            for canonical, source in canonical_to_source.items()
+            if canonical != source
+        }
+
+        # arrays kwargs
+        arrays_kwargs = {
+            "expressions": all_branches,
+            "how": "zip",
+            "library": "ak",
+        }
+        if aliases:
+            arrays_kwargs["aliases"] = aliases
+
         for root_file in root_files:
             print(f"Processing file: {root_file}")
             if self.max_files is not None and files_processed >= self.max_files:
@@ -112,14 +159,9 @@ class L1NanoDataset(Dataset):
             try:
                 file = uproot.open(root_file)
                 tree = file[self.tree_name]
-                
-                # Load data using arrays with 'how=zip'
-                events_data = tree.arrays(
-                    filter_name=all_branches,
-                    how="zip",
-                    library="ak"
-                )
-                
+
+                events_data = tree.arrays(**arrays_kwargs)
+
                 # Convert to list for iteration
                 num_events = len(events_data)
                 print(f"  Found {num_events} events in file")
@@ -294,9 +336,13 @@ class L1NanoDataset(Dataset):
         
         mask_muons = abs(pdgIds) == 13
         if hasattr(event.GenPart, 'statusFlags'):
-            statusFlags = event.GenPart.statusFlags
-            mask_lastcopy = (statusFlags & (1 << 13)) != 0
-            mask_muons = mask_muons & mask_lastcopy
+            if "prod/" in self.root_dir:
+                # StatusFlag is killing all in new samples... 
+                warnings.warn("StatusFlags filtering is disable for 'prod' samples... Review samples and check code line 342")
+            else:
+                statusFlags = event.GenPart.statusFlags
+                mask_lastcopy = (statusFlags & (1 << 13)) != 0
+                mask_muons = mask_muons & mask_lastcopy
 
         if hasattr(event.GenPart, 'pt'):
             mask_muons = mask_muons & (event.GenPart.pt > 1)
@@ -472,6 +518,16 @@ class L1NanoDataset(Dataset):
             return ak.to_numpy(values)
         except Exception:
             return np.asarray(ak.to_list(values), dtype=np.float32)
+
+    @staticmethod
+    def _normalize_var_map(var_config):
+        if isinstance(var_config, dict):
+            return dict(var_config)
+        if isinstance(var_config, (list, tuple)):
+            return {name: name for name in var_config}
+        raise TypeError(
+            "stub_vars/genpart_vars must be a list or a dict mapping canonical_name -> source_name"
+        )
     
 
     def len(self):
@@ -597,10 +653,12 @@ def main():
     parser.add_argument('--tree_name', type=str, default="Events", help='Name of the tree inside the ROOT files')
     parser.add_argument('--stub_vars', nargs='+', type=str, 
                         default=['tfLayer', 'offeta1', 'offphi1'],
-                        help='List of stub variables to extract')
+                        help='List of canonical stub variables to extract (dict mapping is supported via --config YAML)')
     parser.add_argument('--genpart_vars', nargs='+', type=str,
-                        default=['pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2'],
-                        help='List of GenPart variables to extract')
+                        default=['pt', 'eta', 'phi', 'mass', 'pdgId', 'dXY', 'lXY', 'etaSt2', 'phiSt2', 'statusFlags'],
+                        help='List of canonical GenPart variables to extract (dict mapping is supported via --config YAML)')
+    parser.add_argument('--stub_prefix', type=str, default='stub_', help='Prefix of stub branches in ROOT files')
+    parser.add_argument('--genpart_prefix', type=str, default='GenPart_', help='Prefix of GenPart branches in ROOT files')
     parser.add_argument('--dR_threshold', type=float, default=0.15, help='dR threshold for stub-muon matching')
     parser.add_argument('--edge_deta_threshold', type=float, default=0.5, help='abs(deta) threshold for edge building')
     parser.add_argument('--edge_dphi_threshold', type=float, default=1.0, help='abs(dphi) threshold for edge building')
