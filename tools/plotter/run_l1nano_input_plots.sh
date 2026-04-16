@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EMELETRIGGER_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
-ROOT_FILE_DEFAULT="$WORKSPACE_DIR/HTo2LongLivedTo4mu_MH-125_MFF-12_CTau-900mm_TuneCP5_14TeV-pythia8_L1NanoWithGenPropagated_20260212.root"
+ROOT_FILE_DEFAULT="/lustre/ific.uv.es/ml/uovi156/data/HTo2LongLivedTo4mu_MH-125_MFF-12_CTau-900mm_TuneCP5_14TeV-pythia8_L1NanoWithGenPropagated_20260212.root"
 OUT_DIR_DEFAULT="$EMELETRIGGER_DIR/output/l1nano_inputs"
 PROD_DIR_DEFAULT="/lustre/ific.uv.es/ml/uovi156/data/prod"
 MAX_EVENTS_DEFAULT="-1"
