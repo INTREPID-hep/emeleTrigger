@@ -291,35 +291,16 @@ def collect_stub_feature_arrays(stub_collection, mask=None):
     return plot_features, feature_arrays
 
 
-def plot_stub_features(events, outputfolder, qual_value=None, require_endcap=False):
+def plot_stub_features(events, outputfolder):
     if not hasattr(events, "stub"):
         print("[WARNING] No stub collection found in Events tree")
         return
 
-    selection_mask = None
     suffix = "all"
     title = "All Available Stub Feature Distributions"
     color = "steelblue"
 
-    if qual_value is not None:
-        if not hasattr(events.stub, "qual"):
-            print("[WARNING] stub.qual is not available, quality-specific plots skipped")
-            return
-        selection_mask = events.stub.qual == qual_value
-        suffix = f"qual{qual_value}"
-        title = f"Stub Feature Distributions for qual == {qual_value}"
-        color = "darkorange" if qual_value == 2 else "seagreen"
-        if qual_value == 3:
-            color = "mediumpurple"
-        if require_endcap:
-            if not hasattr(events.stub, "isEndcap"):
-                print("[WARNING] stub.isEndcap is not available, qual==3 endcap plot skipped")
-                return
-            selection_mask = selection_mask & events.stub.isEndcap
-            suffix = f"qual{qual_value}_endcap"
-            title = f"Stub Feature Distributions for qual == {qual_value} and isEndcap"
-
-    plot_features, feature_arrays = collect_stub_feature_arrays(events.stub, selection_mask)
+    plot_features, feature_arrays = collect_stub_feature_arrays(events.stub)
     if not plot_features:
         print(f"[WARNING] No plottable numeric stub features found for selection {suffix}")
         return
@@ -453,9 +434,6 @@ def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
     if plot_genpart:
         plot_genpart_summary(events, outputfolder)
     plot_stub_features(events, outputfolder)
-    plot_stub_features(events, outputfolder, qual_value=1)
-    plot_stub_features(events, outputfolder, qual_value=2)
-    plot_stub_features(events, outputfolder, qual_value=3, require_endcap=True)
     return True
 
 
