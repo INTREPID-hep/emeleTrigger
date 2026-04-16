@@ -10,7 +10,7 @@ import uproot
 
 
 PI = float(np.pi)
-L1NANO_GENPART_BRANCHES = [
+L1NANO_GenMuon_BRANCHES = [
     "pt",
     "eta",
     "phi",
@@ -18,11 +18,10 @@ L1NANO_GENPART_BRANCHES = [
     "pdgId",
     "dXY",
     "lXY",
-    "vertX",
-    "vertY",
-    "vertZ",
+    "vx",
+    "vy",
+    "vz",
     "status",
-    "statusFlags",
     "etaSt2",
     "phiSt2",
     "etaSt1",
@@ -124,37 +123,89 @@ def flatten_numeric(values):
     return array[np.isfinite(array)]
 
 
-def build_genmuon_mask(events):
-    mask = abs(events.GenPart.pdgId) == 13
-    if hasattr(events.GenPart, "statusFlags"):
-        mask = mask & ((events.GenPart.statusFlags & (1 << 13)) != 0)
-    if hasattr(events.GenPart, "pt"):
-        mask = mask & (events.GenPart.pt > 1)
-    if hasattr(events.GenPart, "etaSt2"):
-        mask = mask & (events.GenPart.etaSt2 > -999)
+def build_genmuon_mask(events, relax=False):
+    mask = abs(events.GenMuon.pdgId) == 13
+    if not relax:
+        if hasattr(events.GenMuon, "status"):
+            mask = mask & ((events.GenMuon.status & (1 << 13)) != 0)
+        if hasattr(events.GenMuon, "pt"):
+            mask = mask & (events.GenMuon.pt > 1)
+        if hasattr(events.GenMuon, "etaSt2"):
+            mask = mask & (events.GenMuon.etaSt2 > -999)
     return mask
 
 
-def plot_gen_muon_summary(events, outputfolder):
+def plot_genpart_summary(events, outputfolder):
+    """Plot all GenPart particles (no muon/status selection)."""
     if not hasattr(events, "GenPart"):
         print("[WARNING] No GenPart collection found in Events tree")
         return
 
-    mask_allmuons = build_genmuon_mask(events)
-    n_muons_per_event = ak.num(events.GenPart.pdgId[mask_allmuons])
+    gp = events.GenPart
+    fields = ak.fields(gp)
 
-    muon_pt = flatten_numeric(events.GenPart.pt[mask_allmuons])
-    muon_eta = flatten_numeric(events.GenPart.eta[mask_allmuons])
-    muon_phi = flatten_numeric(events.GenPart.phi[mask_allmuons])
-    muon_dxy = flatten_numeric(events.GenPart.dXY[mask_allmuons])
-    muon_lxy = flatten_numeric(events.GenPart.lXY[mask_allmuons])
-    muon_vx = flatten_numeric(events.GenPart.vertX[mask_allmuons])
-    muon_vy = flatten_numeric(events.GenPart.vertY[mask_allmuons])
-    muon_vz = flatten_numeric(events.GenPart.vertZ[mask_allmuons])
+    plot_specs_raw = [
+        ("pt",    50, (0, 200),     "orange",  "pT [GeV]",    "GenPart pT"),
+        ("eta",   50, None,         "green",   "eta",         "GenPart eta"),
+        ("phi",   50, (-3.5, 3.5),  "purple",  "phi [rad]",   "GenPart phi"),
+        ("mass",  50, (0, 200),     "teal",    "mass [GeV]",  "GenPart mass"),
+        ("pdgId", 80, None,         "coral",   "pdgId",       "GenPart pdgId"),
+        ("status",50, None,         "steelblue","status",     "GenPart status"),
+    ]
+    plot_specs = [(f, b, r, c, xl, t) for (f, b, r, c, xl, t) in plot_specs_raw if f in fields]
+
+    if not plot_specs:
+        print("[WARNING] GenPart has no plottable fields")
+        return
+
+    ncols = 3
+    nrows = int(np.ceil(len(plot_specs) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows))
+    axes = np.atleast_1d(axes).flatten()
+    fig.suptitle("GenPart distributions (all particles)", fontsize=16)
+
+    for idx, (feat, bins, hist_range, color, xlabel, title) in enumerate(plot_specs):
+        arr = flatten_numeric(gp[feat])
+        kw = {"bins": bins, "alpha": 0.7, "edgecolor": "black", "color": color}
+        if hist_range is not None:
+            kw["range"] = hist_range
+        axes[idx].hist(arr, **kw)
+        axes[idx].set_xlabel(xlabel, fontsize=12)
+        axes[idx].set_ylabel("Counts", fontsize=12)
+        axes[idx].set_title(title, fontsize=12)
+        axes[idx].grid(True, alpha=0.3)
+
+    for idx in range(len(plot_specs), len(axes)):
+        axes[idx].axis("off")
+
+    plt.tight_layout()
+    output = os.path.join(outputfolder, "genpart_summary.png")
+    plt.savefig(output, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {output}")
+
+
+def plot_gen_muon_summary(events, outputfolder, relax_selection=False):
+    if not hasattr(events, "GenMuon"):
+        print("[WARNING] No GenMuon collection found in Events tree")
+        return
+
+    mask_allmuons = build_genmuon_mask(events, relax=relax_selection)
+    n_muons_per_event = ak.num(events.GenMuon.pdgId[mask_allmuons])
+
+    muon_pt = flatten_numeric(events.GenMuon.pt[mask_allmuons])
+    muon_eta = flatten_numeric(events.GenMuon.eta[mask_allmuons])
+    muon_phi = flatten_numeric(events.GenMuon.phi[mask_allmuons])
+    muon_dxy = flatten_numeric(events.GenMuon.dXY[mask_allmuons])
+    muon_lxy = flatten_numeric(events.GenMuon.lXY[mask_allmuons])
+    muon_vx = flatten_numeric(events.GenMuon.vx[mask_allmuons])
+    muon_vy = flatten_numeric(events.GenMuon.vy[mask_allmuons])
+    muon_vz = flatten_numeric(events.GenMuon.vz[mask_allmuons])
 
     total_muons = len(muon_pt)
     if total_muons == 0:
-        print("[WARNING] No generated muons passed the L1Nano selection")
+        sel_label = "relaxed" if relax_selection else "L1Nano"
+        print(f"[WARNING] No generated muons passed the {sel_label} selection")
         return
 
     fig, axes = plt.subplots(3, 3, figsize=(18, 18))
@@ -302,14 +353,19 @@ def plot_stub_features(events, outputfolder, qual_value=None, require_endcap=Fal
 
 
 def print_l1nano_summary(events):
+    if events is None:
+        print("\n=== L1Nano input summary ===")
+        print("No events loaded")
+        return
+
     stub_fields = ak.fields(events.stub) if hasattr(events, "stub") else []
-    genpart_fields = ak.fields(events.GenPart) if hasattr(events, "GenPart") else []
+    GenMuon_fields = ak.fields(events.GenMuon) if hasattr(events, "GenMuon") else []
 
     print("\n=== L1Nano input summary ===")
     print(f"Events loaded: {len(events)}")
     print(f"stub fields ({len(stub_fields)}): {', '.join(stub_fields)}")
-    available_genpart_fields = [field for field in L1NANO_GENPART_BRANCHES if field in genpart_fields]
-    print(f"GenPart fields used ({len(available_genpart_fields)}): {', '.join(available_genpart_fields)}")
+    available_GenMuon_fields = [field for field in L1NANO_GenMuon_BRANCHES if field in GenMuon_fields]
+    print(f"GenMuon fields used ({len(available_GenMuon_fields)}): {', '.join(available_GenMuon_fields)}")
 
     if hasattr(events, "stub") and hasattr(events.stub, "qual"):
         qual_values = flatten_numeric(events.stub.qual)
@@ -320,23 +376,87 @@ def print_l1nano_summary(events):
                 print(f"  qual == {qual}: {count}")
 
 
-def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None):
+def normalize_collection_names(events, gen_collection="auto"):
+    """Normalize collection names to canonical names for code consistency.
+
+    gen_collection: 'auto' | 'GenMuon' | 'GenPart'
+      auto  -> prefer GenMuon; fall back to GenPart mapped as GenMuon
+      GenMuon -> use GenMuon only
+      GenPart -> keep GenPart as-is (also expose as GenMuon for muon plots)
+    """
+    if hasattr(events, 'MuonStubTps') and not hasattr(events, 'stub'):
+        events['stub'] = events['MuonStubTps']
+
+    if gen_collection in ("auto", "GenMuon"):
+        if hasattr(events, 'GenPart') and not hasattr(events, 'GenMuon'):
+            events['GenMuon'] = events['GenPart']
+    elif gen_collection == "GenPart":
+        # Expose GenPart also as GenMuon so muon-summary plots work
+        if hasattr(events, 'GenPart') and not hasattr(events, 'GenMuon'):
+            events['GenMuon'] = events['GenPart']
+    return events
+
+
+def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
+                          gen_collection="auto", relax_gen_selection=False,
+                          plot_genpart=False):
     assert os.path.isfile(inputfile), print("File does not exist")
 
     tree = uproot.open(f"{inputfile}:{treename}")
+    branch_names = tree.keys()
+    has_stub = any(name.startswith(("stub_", "MuonStubTps_")) for name in branch_names)
+    has_gen = any(name.startswith(("GenMuon_", "GenPart_")) for name in branch_names)
+
+    if not (has_stub and has_gen):
+        print("\n=== L1Nano input summary ===")
+        print("[WARNING] File does not contain the expected L1Nano branches (stub_*/MuonStubTps_* and GenMuon_*/GenPart_*).")
+        print(f"[WARNING] Skipping file: {inputfile}")
+        preview = ", ".join(branch_names[:12])
+        print(f"[WARNING] Branch preview: {preview}")
+        return False
+
+    filter_names = ["stub_*", "MuonStubTps_*"]
+    if gen_collection in ("auto", "GenMuon"):
+        filter_names += ["GenMuon_*", "GenPart_*"]
+    elif gen_collection == "GenPart":
+        filter_names += ["GenPart_*"]
+
     events = tree.arrays(
-        filter_name=["stub_*", "GenPart_*"],
+        filter_name=filter_names,
         how="zip",
         library="ak",
         entry_stop=max_events,
     )
 
+    if events is None:
+        print("\n=== L1Nano input summary ===")
+        print("[WARNING] uproot returned no events for selected branches; skipping file")
+        return False
+
+    try:
+        loaded_events = len(events)
+    except TypeError:
+        print("\n=== L1Nano input summary ===")
+        print("[WARNING] Loaded event container is not iterable; skipping file")
+        return False
+
+    if loaded_events == 0:
+        print("\n=== L1Nano input summary ===")
+        print("[WARNING] No events loaded after branch filtering; skipping file")
+        return False
+
+    # Normalize collection names for code compatibility
+    events = normalize_collection_names(events, gen_collection=gen_collection)
+
     print_l1nano_summary(events)
-    plot_gen_muon_summary(events, outputfolder)
+    plot_gen_muon_summary(events, outputfolder, relax_selection=relax_gen_selection)
+    if plot_genpart:
+        plot_genpart_summary(events, outputfolder)
     plot_stub_features(events, outputfolder)
     plot_stub_features(events, outputfolder, qual_value=1)
     plot_stub_features(events, outputfolder, qual_value=2)
     plot_stub_features(events, outputfolder, qual_value=3, require_endcap=True)
+    return True
 
 
 def main():
@@ -352,6 +472,21 @@ def main():
     parser.add_argument("-p", "--plots", dest="plots", default="all", help="Plots to be made in OMTF mode")
     parser.add_argument("-m", "--mode", dest="mode", choices=["omtf", "l1nano"], default="omtf", help="Input format to inspect")
     parser.add_argument("--max-events", dest="max_events", type=int, default=None, help="Maximum number of events to read in l1nano mode")
+    parser.add_argument(
+        "--gen-collection", dest="gen_collection",
+        choices=["auto", "GenMuon", "GenPart"], default="auto",
+        help="Which generator-level collection to use (auto: prefer GenMuon, fall back to GenPart)",
+    )
+    parser.add_argument(
+        "--relax-gen-selection", dest="relax_gen_selection",
+        action="store_true", default=False,
+        help="Relax GenMuon selection (skip status-bit / pT / etaSt2 cuts)",
+    )
+    parser.add_argument(
+        "--plot-genpart", dest="plot_genpart",
+        action="store_true", default=False,
+        help="Also draw a GenPart summary plot (all particles, no muon selection)",
+    )
 
     args = parser.parse_args()
 
@@ -364,7 +499,14 @@ def main():
     if args.mode == "l1nano":
         if args.tree == parser.get_default("tree"):
             args.tree = "Events"
-        draw_l1nano_variables(args.inputfile, args.output, args.tree, args.max_events)
+        ok = draw_l1nano_variables(
+            args.inputfile, args.output, args.tree, args.max_events,
+            gen_collection=args.gen_collection,
+            relax_gen_selection=args.relax_gen_selection,
+            plot_genpart=args.plot_genpart,
+        )
+        if not ok:
+            raise SystemExit(2)
     else:
         draw_single_vars(args.inputfile, args.output, args.tree, args.plots, "muonPropEta!=0&&muonPropPhi!=0")
         draw_correlations(args.inputfile, args.output, args.tree, "muonPropEta!=0&&muonPropPhi!=0")

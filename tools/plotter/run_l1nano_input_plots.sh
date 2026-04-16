@@ -22,13 +22,16 @@ if [ ! -f "$ROOT_FILE_DEFAULT" ]; then
   fi
 fi
 
-ROOT_FILE="${1:-$ROOT_FILE_DEFAULT}"
-OUT_DIR="${2:-$OUT_DIR_DEFAULT}"
-MAX_EVENTS="${3:-$MAX_EVENTS_DEFAULT}"
-TREE_NAME="${4:-$TREE_DEFAULT}"
+ROOT_FILE="$ROOT_FILE_DEFAULT"
+OUT_DIR="$OUT_DIR_DEFAULT"
+MAX_EVENTS="$MAX_EVENTS_DEFAULT"
+TREE_NAME="$TREE_DEFAULT"
 RUN_SCAN_MODE=false
 PROD_DIR="$PROD_DIR_DEFAULT"
 MAX_FILES_PER_SAMPLE="$MAX_FILES_PER_SAMPLE_DEFAULT"
+GEN_COLLECTION="auto"
+RELAX_GEN_SELECTION=false
+PLOT_GENPART=false
 
 show_help() {
   cat <<EOF
@@ -46,6 +49,9 @@ Options:
   --max-events N            Events per ROOT file passed to draw_variables.py (default: $MAX_EVENTS_DEFAULT)
   --tree NAME               TTree name (default: $TREE_DEFAULT)
   --max-files-per-sample N  Limit files per sample; -1 means all files (default: $MAX_FILES_PER_SAMPLE_DEFAULT)
+  --gen-collection NAME     Generator collection to use: auto, GenMuon, GenPart (default: auto)
+  --relax-gen-selection     Skip tight GenMuon selection (status bit / pT / etaSt2 cuts)
+  --plot-genpart            Also draw a GenPart summary plot (all particles)
   -h, --help                Show this help
 EOF
 }
@@ -81,6 +87,18 @@ if [[ "$RUN_SCAN_MODE" == true ]]; then
         MAX_FILES_PER_SAMPLE="$2"
         shift 2
         ;;
+      --gen-collection)
+        GEN_COLLECTION="$2"
+        shift 2
+        ;;
+      --relax-gen-selection)
+        RELAX_GEN_SELECTION=true
+        shift
+        ;;
+      --plot-genpart)
+        PLOT_GENPART=true
+        shift
+        ;;
       -h|--help)
         show_help
         exit 0
@@ -92,6 +110,11 @@ if [[ "$RUN_SCAN_MODE" == true ]]; then
         ;;
     esac
   done
+else
+  ROOT_FILE="${1:-$ROOT_FILE_DEFAULT}"
+  OUT_DIR="${2:-$OUT_DIR_DEFAULT}"
+  MAX_EVENTS="${3:-$MAX_EVENTS_DEFAULT}"
+  TREE_NAME="${4:-$TREE_DEFAULT}"
 fi
 
 if [ -n "${CONDA_ENV_NAME:-}" ]; then
@@ -111,6 +134,9 @@ if [[ "$RUN_SCAN_MODE" == false ]]; then
   echo "  out dir   : $OUT_DIR"
   echo "  max events: $MAX_EVENTS"
   echo "  tree      : $TREE_NAME"
+  echo "  gen coll  : $GEN_COLLECTION"
+  echo "  relax gen : $RELAX_GEN_SELECTION"
+  echo "  plot GenPart: $PLOT_GENPART"
 else
   echo "  mode      : scan"
   echo "  prod dir  : $PROD_DIR"
@@ -118,17 +144,25 @@ else
   echo "  max events: $MAX_EVENTS"
   echo "  tree      : $TREE_NAME"
   echo "  max files/sample: $MAX_FILES_PER_SAMPLE"
+  echo "  gen coll  : $GEN_COLLECTION"
+  echo "  relax gen : $RELAX_GEN_SELECTION"
+  echo "  plot GenPart: $PLOT_GENPART"
 fi
 
 mkdir -p "$OUT_DIR"
 
 if [[ "$RUN_SCAN_MODE" == false ]]; then
+  GEN_FLAGS=("--gen-collection" "$GEN_COLLECTION")
+  [[ "$RELAX_GEN_SELECTION" == true ]] && GEN_FLAGS+=("--relax-gen-selection")
+  [[ "$PLOT_GENPART" == true ]] && GEN_FLAGS+=("--plot-genpart")
+
   MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/draw_variables.py" \
     --mode l1nano \
     --ifile "$ROOT_FILE" \
     --tree "$TREE_NAME" \
     --ofolder "$OUT_DIR" \
-    --max-events "$MAX_EVENTS"
+    --max-events "$MAX_EVENTS" \
+    "${GEN_FLAGS[@]}"
 
   echo "Done. Generated files in: $OUT_DIR"
   exit 0
@@ -157,6 +191,7 @@ for sample in "${SAMPLES_DEFAULT[@]}"; do
 
   echo "Processing sample $sample (${#nano_files[@]} nano files found)"
   processed=0
+  failed=0
   for root_file in "${nano_files[@]}"; do
     if [[ "$MAX_FILES_PER_SAMPLE" -ge 0 && "$processed" -ge "$MAX_FILES_PER_SAMPLE" ]]; then
       break
@@ -167,17 +202,25 @@ for sample in "${SAMPLES_DEFAULT[@]}"; do
     mkdir -p "$file_out_dir"
 
     echo "  -> $base_name"
-    MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/draw_variables.py" \
+    GEN_FLAGS=("--gen-collection" "$GEN_COLLECTION")
+    [[ "$RELAX_GEN_SELECTION" == true ]] && GEN_FLAGS+=("--relax-gen-selection")
+    [[ "$PLOT_GENPART" == true ]] && GEN_FLAGS+=("--plot-genpart")
+
+    if MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/draw_variables.py" \
       --mode l1nano \
       --ifile "$root_file" \
       --tree "$TREE_NAME" \
       --ofolder "$file_out_dir" \
-      --max-events "$MAX_EVENTS"
-
-    processed=$((processed + 1))
+      --max-events "$MAX_EVENTS" \
+      "${GEN_FLAGS[@]}"; then
+      processed=$((processed + 1))
+    else
+      failed=$((failed + 1))
+      echo "  [WARNING] failed for $base_name, continuing"
+    fi
   done
 
-  echo "  processed $processed files for $sample"
+  echo "  processed $processed files for $sample (failed: $failed)"
 done
 
 echo "Done. Scan outputs available in: $OUT_DIR"
