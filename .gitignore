@@ -16,3 +16,7 @@ pyenv_win
 *.pt
 *.pth
 
+*env*
+*.vscode*
+*test-destrada*
+*.ipynb_checkpoints
