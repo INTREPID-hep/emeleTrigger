@@ -129,11 +129,13 @@ To reproduce the variable checks done in the notebook directly from the plotting
 ```bash
 python tools/plotter/draw_variables.py \
   --mode l1nano \
-  --ifile /path/to/file.root \
+  --ifile /path/to/file.root /path/to/file2.root \
   --tree Events \
   --ofolder output/l1nano_inputs/ \
   --max-events 100
 ```
+
+If more than one ROOT file is passed, the script loads them all, merges the selected events, and produces a single combined set of plots.
 
 This produces:
 - `gen_muon_summary.png`: GenPart muon kinematics and displacement summary, using the same selection as the notebook.

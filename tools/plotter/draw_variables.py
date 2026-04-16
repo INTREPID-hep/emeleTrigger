@@ -33,6 +33,18 @@ def ensure_output_dir(outputfolder):
     Path(outputfolder).mkdir(parents=True, exist_ok=True)
 
 
+def parse_input_files(input_values):
+    if isinstance(input_values, str):
+        raw_values = [input_values]
+    else:
+        raw_values = input_values
+
+    input_files = []
+    for value in raw_values:
+        input_files.extend(part.strip() for part in value.split(",") if part.strip())
+    return input_files
+
+
 def get_root_module():
     try:
         import ROOT  # pylint: disable=import-error
@@ -404,10 +416,27 @@ def normalize_collection_names(events, gen_collection="auto"):
     return events
 
 
-def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
-                          gen_collection="auto", relax_gen_selection=False,
-                          plot_genpart=False):
-    assert os.path.isfile(inputfile), print("File does not exist")
+def standardize_l1nano_events(events, include_genpart=False):
+    collections = {}
+
+    if hasattr(events, "stub"):
+        collections["stub"] = events.stub
+    if hasattr(events, "GenMuon"):
+        collections["GenMuon"] = events.GenMuon
+    if include_genpart and hasattr(events, "GenPart"):
+        collections["GenPart"] = events.GenPart
+
+    if not collections:
+        return None
+
+    return ak.zip(collections, depth_limit=1)
+
+
+def load_l1nano_events_from_file(inputfile, treename, entry_stop=None,
+                                 gen_collection="auto", include_genpart=False):
+    if not os.path.isfile(inputfile):
+        print(f"[WARNING] File does not exist, skipping: {inputfile}")
+        return None
 
     tree = uproot.open(f"{inputfile}:{treename}")
     branch_names = tree.keys()
@@ -420,7 +449,7 @@ def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
         print(f"[WARNING] Skipping file: {inputfile}")
         preview = ", ".join(branch_names[:12])
         print(f"[WARNING] Branch preview: {preview}")
-        return False
+        return None
 
     filter_names = ["stub_*", "MuonStubTps_*"]
     if gen_collection in ("auto", "GenMuon"):
@@ -432,28 +461,100 @@ def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
         filter_name=filter_names,
         how="zip",
         library="ak",
-        entry_stop=max_events,
+        entry_stop=entry_stop,
     )
 
     if events is None:
         print("\n=== L1Nano input summary ===")
         print("[WARNING] uproot returned no events for selected branches; skipping file")
-        return False
+        return None
 
     try:
         loaded_events = len(events)
     except TypeError:
         print("\n=== L1Nano input summary ===")
         print("[WARNING] Loaded event container is not iterable; skipping file")
-        return False
+        return None
 
     if loaded_events == 0:
         print("\n=== L1Nano input summary ===")
         print("[WARNING] No events loaded after branch filtering; skipping file")
-        return False
+        return None
 
-    # Normalize collection names for code compatibility
     events = normalize_collection_names(events, gen_collection=gen_collection)
+    events = standardize_l1nano_events(events, include_genpart=include_genpart)
+    if events is None:
+        print("\n=== L1Nano input summary ===")
+        print(f"[WARNING] No compatible collections found after normalization; skipping file: {inputfile}")
+        return None
+
+    print(f"[INFO] Loaded {loaded_events} events from {inputfile}")
+    return events
+
+
+def load_l1nano_events(inputfiles, treename, max_events=None,
+                       gen_collection="auto", include_genpart=False):
+    merged_inputs = []
+    total_events = 0
+
+    for inputfile in inputfiles:
+        remaining_events = None if max_events is None else max_events - total_events
+        if remaining_events is not None and remaining_events <= 0:
+            break
+
+        events = load_l1nano_events_from_file(
+            inputfile,
+            treename,
+            entry_stop=remaining_events,
+            gen_collection=gen_collection,
+            include_genpart=include_genpart,
+        )
+        if events is None:
+            continue
+
+        merged_inputs.append(events)
+        total_events += len(events)
+
+    if not merged_inputs:
+        return None
+
+    if len(merged_inputs) == 1:
+        return merged_inputs[0]
+
+    common_fields = set(ak.fields(merged_inputs[0]))
+    for events in merged_inputs[1:]:
+        common_fields &= set(ak.fields(events))
+
+    ordered_fields = [field for field in ("stub", "GenMuon", "GenPart") if field in common_fields]
+    if not ordered_fields:
+        print("[WARNING] No common collections found across input files after normalization")
+        return None
+
+    if any(set(ak.fields(events)) != set(ordered_fields) for events in merged_inputs):
+        print(f"[WARNING] Input files expose different collections; merging common fields only: {', '.join(ordered_fields)}")
+        merged_inputs = [
+            ak.zip({field: events[field] for field in ordered_fields}, depth_limit=1)
+            for events in merged_inputs
+        ]
+
+    print(f"[INFO] Merging {len(merged_inputs)} input files for plotting ({total_events} total events)")
+    return ak.concatenate(merged_inputs, axis=0)
+
+
+def draw_l1nano_variables(inputfiles, outputfolder, treename, max_events=None,
+                          gen_collection="auto", relax_gen_selection=False,
+                          plot_genpart=False):
+    events = load_l1nano_events(
+        inputfiles,
+        treename,
+        max_events=max_events,
+        gen_collection=gen_collection,
+        include_genpart=plot_genpart,
+    )
+    if events is None:
+        print("\n=== L1Nano input summary ===")
+        print("[WARNING] No valid input files could be loaded")
+        return False
 
     print_l1nano_summary(events)
     plot_gen_muon_summary(events, outputfolder, relax_selection=relax_gen_selection)
@@ -473,7 +574,10 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument("-i", "--ifile", dest="inputfile", default="data/omtfAnalysis2.root", help="Input filename")
+    parser.add_argument(
+        "-i", "--ifile", dest="inputfile", nargs="+", default=["data/omtfAnalysis2.root"],
+        help="Input filename(s); pass multiple paths separated by spaces or commas",
+    )
     parser.add_argument("-o", "--ofolder", dest="output", default="output/omtfAnalysis2/", help="Folder name to store results")
     parser.add_argument("-t", "--tree", dest="tree", default="simOmtfDigis/OMTFHitsTree", help="Tree name")
     parser.add_argument("-p", "--plots", dest="plots", default="all", help="Plots to be made in OMTF mode")
@@ -496,10 +600,13 @@ def main():
     )
 
     args = parser.parse_args()
+    input_files = parse_input_files(args.inputfile)
 
     ensure_output_dir(args.output)
 
-    print(f"Running on: {args.inputfile}")
+    print(f"Running on {len(input_files)} input file(s)")
+    for input_file in input_files:
+        print(f"  - {input_file}")
     print(f"Saving result in: {args.output}")
     print(f"Mode: {args.mode}")
 
@@ -507,7 +614,7 @@ def main():
         if args.tree == parser.get_default("tree"):
             args.tree = "Events"
         ok = draw_l1nano_variables(
-            args.inputfile, args.output, args.tree, args.max_events,
+            input_files, args.output, args.tree, args.max_events,
             gen_collection=args.gen_collection,
             relax_gen_selection=args.relax_gen_selection,
             plot_genpart=args.plot_genpart,
@@ -515,8 +622,10 @@ def main():
         if not ok:
             raise SystemExit(2)
     else:
-        draw_single_vars(args.inputfile, args.output, args.tree, args.plots, "muonPropEta!=0&&muonPropPhi!=0")
-        draw_correlations(args.inputfile, args.output, args.tree, "muonPropEta!=0&&muonPropPhi!=0")
+        if len(input_files) != 1:
+            raise SystemExit("OMTF mode supports exactly one input file")
+        draw_single_vars(input_files[0], args.output, args.tree, args.plots, "muonPropEta!=0&&muonPropPhi!=0")
+        draw_correlations(input_files[0], args.output, args.tree, "muonPropEta!=0&&muonPropPhi!=0")
 
     print("DONE")
 

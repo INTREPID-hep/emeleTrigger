@@ -190,37 +190,30 @@ for sample in "${SAMPLES_DEFAULT[@]}"; do
   fi
 
   echo "Processing sample $sample (${#nano_files[@]} nano files found)"
-  processed=0
-  failed=0
-  for root_file in "${nano_files[@]}"; do
-    if [[ "$MAX_FILES_PER_SAMPLE" -ge 0 && "$processed" -ge "$MAX_FILES_PER_SAMPLE" ]]; then
-      break
-    fi
+  selected_files=("${nano_files[@]}")
+  if [[ "$MAX_FILES_PER_SAMPLE" -ge 0 && ${#selected_files[@]} -gt "$MAX_FILES_PER_SAMPLE" ]]; then
+    selected_files=("${selected_files[@]:0:$MAX_FILES_PER_SAMPLE}")
+  fi
 
-    base_name="$(basename "$root_file" .root)"
-    file_out_dir="$OUT_DIR/$sample/$base_name"
-    mkdir -p "$file_out_dir"
+  sample_out_dir="$OUT_DIR/$sample"
+  mkdir -p "$sample_out_dir"
 
-    echo "  -> $base_name"
-    GEN_FLAGS=("--gen-collection" "$GEN_COLLECTION")
-    [[ "$RELAX_GEN_SELECTION" == true ]] && GEN_FLAGS+=("--relax-gen-selection")
-    [[ "$PLOT_GENPART" == true ]] && GEN_FLAGS+=("--plot-genpart")
+  echo "  -> merging ${#selected_files[@]} file(s) into one plot set"
+  GEN_FLAGS=("--gen-collection" "$GEN_COLLECTION")
+  [[ "$RELAX_GEN_SELECTION" == true ]] && GEN_FLAGS+=("--relax-gen-selection")
+  [[ "$PLOT_GENPART" == true ]] && GEN_FLAGS+=("--plot-genpart")
 
-    if MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/draw_variables.py" \
-      --mode l1nano \
-      --ifile "$root_file" \
-      --tree "$TREE_NAME" \
-      --ofolder "$file_out_dir" \
-      --max-events "$MAX_EVENTS" \
-      "${GEN_FLAGS[@]}"; then
-      processed=$((processed + 1))
-    else
-      failed=$((failed + 1))
-      echo "  [WARNING] failed for $base_name, continuing"
-    fi
-  done
-
-  echo "  processed $processed files for $sample (failed: $failed)"
+  if MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/draw_variables.py" \
+    --mode l1nano \
+    --ifile "${selected_files[@]}" \
+    --tree "$TREE_NAME" \
+    --ofolder "$sample_out_dir" \
+    --max-events "$MAX_EVENTS" \
+    "${GEN_FLAGS[@]}"; then
+    echo "  processed ${#selected_files[@]} files for $sample"
+  else
+    echo "  [WARNING] merged plotting failed for $sample, continuing"
+  fi
 done
 
 echo "Done. Scan outputs available in: $OUT_DIR"
