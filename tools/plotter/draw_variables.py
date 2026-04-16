@@ -291,16 +291,40 @@ def collect_stub_feature_arrays(stub_collection, mask=None):
     return plot_features, feature_arrays
 
 
-def plot_stub_features(events, outputfolder):
+def get_stub_quality_values(stub_collection):
+    if hasattr(stub_collection, "qual"):
+        return stub_collection.qual, "qual"
+    if hasattr(stub_collection, "quality"):
+        return stub_collection.quality, "quality"
+    return None, None
+
+
+def plot_stub_features(events, outputfolder, quality_value=None):
     if not hasattr(events, "stub"):
         print("[WARNING] No stub collection found in Events tree")
         return
 
+    selection_mask = None
     suffix = "all"
     title = "All Available Stub Feature Distributions"
     color = "steelblue"
 
-    plot_features, feature_arrays = collect_stub_feature_arrays(events.stub)
+    if quality_value is not None:
+        quality_values, quality_field = get_stub_quality_values(events.stub)
+        if quality_values is None:
+            print("[WARNING] Neither stub.qual nor stub.quality is available, quality-specific plots skipped")
+            return
+        selection_mask = quality_values == quality_value
+        suffix = f"quality{quality_value}"
+        title = f"Stub Feature Distributions for {quality_field} == {quality_value}"
+        if quality_value == 1:
+            color = "seagreen"
+        elif quality_value == 2:
+            color = "darkorange"
+        elif quality_value == 3:
+            color = "mediumpurple"
+
+    plot_features, feature_arrays = collect_stub_feature_arrays(events.stub, selection_mask)
     if not plot_features:
         print(f"[WARNING] No plottable numeric stub features found for selection {suffix}")
         return
@@ -348,13 +372,15 @@ def print_l1nano_summary(events):
     available_GenMuon_fields = [field for field in L1NANO_GenMuon_BRANCHES if field in GenMuon_fields]
     print(f"GenMuon fields used ({len(available_GenMuon_fields)}): {', '.join(available_GenMuon_fields)}")
 
-    if hasattr(events, "stub") and hasattr(events.stub, "qual"):
-        qual_values = flatten_numeric(events.stub.qual)
-        if qual_values.size > 0:
-            unique_quals, counts = np.unique(qual_values.astype(int), return_counts=True)
-            print("Stub quality counts:")
-            for qual, count in zip(unique_quals, counts):
-                print(f"  qual == {qual}: {count}")
+    if hasattr(events, "stub"):
+        quality_values, quality_field = get_stub_quality_values(events.stub)
+        if quality_values is not None:
+            qual_values = flatten_numeric(quality_values)
+            if qual_values.size > 0:
+                unique_quals, counts = np.unique(qual_values.astype(int), return_counts=True)
+                print("Stub quality counts:")
+                for qual, count in zip(unique_quals, counts):
+                    print(f"  {quality_field} == {qual}: {count}")
 
 
 def normalize_collection_names(events, gen_collection="auto"):
@@ -434,6 +460,9 @@ def draw_l1nano_variables(inputfile, outputfolder, treename, max_events=None,
     if plot_genpart:
         plot_genpart_summary(events, outputfolder)
     plot_stub_features(events, outputfolder)
+    plot_stub_features(events, outputfolder, quality_value=1)
+    plot_stub_features(events, outputfolder, quality_value=2)
+    plot_stub_features(events, outputfolder, quality_value=3)
     return True
 
 
