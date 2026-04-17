@@ -19,4 +19,4 @@ genpart_vars:
   lXY: "lXY"
   etaSt2: "etaSt2"
   phiSt2: "phiSt2"
-  statusFlags: "status"
+  status: "status"

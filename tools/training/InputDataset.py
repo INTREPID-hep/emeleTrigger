@@ -275,11 +275,14 @@ class L1NanoDataset(Dataset):
         
         mask_muons = abs(pdgIds) == 13
         
-        # Filter by statusFlags (bit 13 = isLastCopy)
+        # Filter by statusFlags (bit 13 = isLastCopy) or status == 1 if statusFlags not available
         if hasattr(event.GenPart, 'statusFlags'):
             statusFlags = event.GenPart.statusFlags
             mask_lastcopy = (statusFlags & (1 << 13)) != 0
             mask_muons = mask_muons & mask_lastcopy
+
+        elif hasattr(event.GenPart, 'status'):
+            mask_muons = mask_muons & (event.GenPart.status == 1)
 
         if hasattr(event.GenPart, 'pt'):
             mask_muons = mask_muons & (event.GenPart.pt > 1)
@@ -336,13 +339,12 @@ class L1NanoDataset(Dataset):
         
         mask_muons = abs(pdgIds) == 13
         if hasattr(event.GenPart, 'statusFlags'):
-            if "prod/" in self.root_dir:
-                # StatusFlag is killing all in new samples... 
-                warnings.warn("StatusFlags filtering is disable for 'prod' samples... Review samples and check code line 342")
-            else:
-                statusFlags = event.GenPart.statusFlags
-                mask_lastcopy = (statusFlags & (1 << 13)) != 0
-                mask_muons = mask_muons & mask_lastcopy
+            statusFlags = event.GenPart.statusFlags
+            mask_lastcopy = (statusFlags & (1 << 13)) != 0
+            mask_muons = mask_muons & mask_lastcopy
+
+        elif hasattr(event.GenPart, 'status'):
+            mask_muons = mask_muons & (event.GenPart.status == 1)
 
         if hasattr(event.GenPart, 'pt'):
             mask_muons = mask_muons & (event.GenPart.pt > 1)
