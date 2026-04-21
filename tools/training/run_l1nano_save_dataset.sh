@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
+echo " Script Directory :       $SCRIPT_DIR"
+echo " EmeleTrigger Directory : $EMELETRIGGER_DIR"
+echo " Workspace :              $WORKSPACE_DIR"
+
 ROOT_FILE_DEFAULT="/lustre/ific.uv.es/ml/uovi156/data/HTo2LongLivedTo4mu_MH-125_MFF-12_CTau-900mm_TuneCP5_14TeV-pythia8_L1NanoWithGenPropagated_20260212.root"
 OUT_FILE_DEFAULT="/lustre/ific.uv.es/ml/uovi156/data/graphs/l1nano_graphs_HTo2LongLivedTo4mu_MH-125_MFF-12_CTau-900mm_20260212.pt"
 OUT_DIR_DEFAULT="/lustre/ific.uv.es/ml/uovi156/data/graphs/l1nano_graphs_prod"

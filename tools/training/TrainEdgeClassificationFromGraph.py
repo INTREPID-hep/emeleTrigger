@@ -40,6 +40,18 @@ class EdgeClassifierGNN(nn.Module):
             self.conv1 = GCNConv(in_channels, hidden_dim)
             self.conv2 = GCNConv(hidden_dim, hidden_dim)
             self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        elif self.model_type == "TransformerConv":
+            self.conv1 = TransformerConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels, heads=4, concat=False)
+            self.conv2 = TransformerConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
+            self.conv3 = TransformerConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
+        elif self.model_type == "SAGE":
+            self.conv1 = SAGEConv(in_channels, hidden_dim)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+            self.conv3 = SAGEConv(hidden_dim, hidden_dim)
+        elif self.model_type == "SAGEUpgrade":
+            self.conv1 = SAGEConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels)
+            self.conv2 = SAGEConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels)
+            self.conv3 = SAGEConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels)
         else:
             self.conv1 = SAGEConv(in_channels, hidden_dim)
             self.conv2 = SAGEConv(hidden_dim, hidden_dim)

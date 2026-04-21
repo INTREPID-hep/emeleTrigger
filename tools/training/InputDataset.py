@@ -15,6 +15,12 @@ import matplotlib.pyplot as plt
 
 import yaml
 
+## ## ## ## Leyenda ## ## ## ##
+
+### Dudas
+
+## ## ## ##          ## ## ## ##
+
 try:
     from converter import remove_empty_or_nan_graphs
 except ImportError:
@@ -253,7 +259,9 @@ class L1NanoDataset(Dataset):
                     
                     if graph_data.edge_index.size(1) == 0:
                         events_skipped_no_edges += 1
-
+                        print(f"Event {event} has no edges")
+                        ### No debería de haber un "continue" o ¿estos eventos sirven para algo?
+                    
                     has_nan = (
                         torch.isnan(graph_data.x).any() or
                         (graph_data.edge_attr is not None and torch.isnan(graph_data.edge_attr).any()) or
@@ -261,6 +269,8 @@ class L1NanoDataset(Dataset):
                     )
                     if has_nan:
                         events_skipped_nan += 1
+                        print(f"Event {event} has NaN")
+                        ### No debería de haber un "continue" o ¿estos eventos sirven para algo?
                     
                     # Apply pre-transform if provided
                     if self.pre_transform is not None:
@@ -325,12 +335,12 @@ class L1NanoDataset(Dataset):
         if len(pdgIds) == 0:
             return torch.zeros((0, len(self.genpart_vars)), dtype=torch.float32)
         
-        mask_muons = abs(pdgIds) == 13
+        mask_muons = abs(pdgIds) == 13       ### ¿Esto está definido como mask = ()?
         
         # Filter by statusFlags (bit 13 = isLastCopy) or status == 1 if statusFlags not available
         if hasattr(event.GenPart, 'statusFlags'):
             statusFlags = event.GenPart.statusFlags
-            mask_lastcopy = (statusFlags & (1 << 13)) != 0
+            mask_lastcopy = (statusFlags & (1 << 13)) != 0       ### ¿Qué hace esto?
             mask_muons = mask_muons & mask_lastcopy
 
         elif hasattr(event.GenPart, 'status'):
@@ -373,7 +383,7 @@ class L1NanoDataset(Dataset):
                 torch.full((num_stubs,), -1, dtype=torch.float32),
                 torch.full((num_stubs,), 999.0, dtype=torch.float32),
                 torch.full((num_stubs,), -1, dtype=torch.float32),
-            )
+            )       ### ¿Qué devuleve esto?
 
         stub_eta = self._ak_to_numpy_safe(event.stub.offeta1)
         stub_phi = self._ak_to_numpy_safe(event.stub.offphi1)
@@ -387,12 +397,12 @@ class L1NanoDataset(Dataset):
                 torch.full((num_stubs,), -1, dtype=torch.float32),
                 torch.full((num_stubs,), 999.0, dtype=torch.float32),
                 torch.full((num_stubs,), -1, dtype=torch.float32),
-            )
+            )       ### ¿Qué devuelve esto?
         
         mask_muons = abs(pdgIds) == 13
         if hasattr(event.GenPart, 'statusFlags'):
             statusFlags = event.GenPart.statusFlags
-            mask_lastcopy = (statusFlags & (1 << 13)) != 0
+            mask_lastcopy = (statusFlags & (1 << 13)) != 0       ### ¿Qué es lo que hace?
             mask_muons = mask_muons & mask_lastcopy
 
         elif hasattr(event.GenPart, 'status'):
@@ -401,7 +411,7 @@ class L1NanoDataset(Dataset):
         if hasattr(event.GenPart, 'pt'):
             mask_muons = mask_muons & (event.GenPart.pt > 1)
 
-        if hasattr(event.GenPart, 'etaSt2'):
+        if hasattr(event.GenPart, 'etaSt2'):       ### ¿Qué es etaSt2?
             mask_muons = mask_muons & (event.GenPart.etaSt2 > -999)
         
         if ak.sum(mask_muons) == 0:
@@ -442,6 +452,7 @@ class L1NanoDataset(Dataset):
             else:
                 labels[i] = 0.0
                 min_deltaR[i] = min_dR
+                ### El matched_indices[i] ¿queda como -1?
 
         return (
             torch.tensor(labels, dtype=torch.float32),
@@ -452,7 +463,7 @@ class L1NanoDataset(Dataset):
     def _build_graph_for_event(self, stub_features, stub_labels, stub_deltaR, stub_matched_idx, genpart_features):
         # Keep only stubs with defined label (>=0), as in notebook
         valid_mask = stub_labels >= 0
-        if valid_mask.sum() == 0:
+        if valid_mask.sum() == 0:       ### ¿Qué hace esto?
             return None
 
         x_full = torch.cat(
@@ -469,6 +480,7 @@ class L1NanoDataset(Dataset):
         nodes = x_full[:, :3]  # tfLayer, offeta1, offphi1
         node_labels = x_full[:, 3].clone()  # 1/0 labels
         matched_idx = x_full[:, 5].clone()  # matched muon indices
+        ### ¿Para qué usa stub_deltaR entonces?
 
         edge_index, edge_attr, edge_y = self._create_edges_by_layer(nodes, matched_idx)
 
@@ -504,6 +516,8 @@ class L1NanoDataset(Dataset):
         eta = node_features[:, 1].numpy()
         phi = node_features[:, 2].numpy()
         matched_np = matched_idx.numpy()
+
+        ### print("tfLayer values: ", tflayer)
         
         edge_index = []
         edge_attr = []
@@ -609,7 +623,11 @@ class L1NanoDataset(Dataset):
         data = self.get(idx)
         
         G = to_networkx(data, to_undirected=True)
-        labels = {i: int(data.x[i, 3].item()) for i in range(data.x.shape[0])}
+        print("data.y.shape[0] = ", data.y.shape[0])
+        print("data.y          = ", data.y)
+        print("data.y.shape    = ", data.y.shape)
+        #labels = {i: int(data.x[i, 3].item()) for i in range(data.x.shape[0])}
+        labels = {i: int(data.y[i].item()) for i in range(data.y.shape[0])}
 
         '''G = nx.Graph()
         

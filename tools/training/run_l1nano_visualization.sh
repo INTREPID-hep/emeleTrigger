@@ -6,7 +6,7 @@ EMELETRIGGER_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 ROOT_FILE_DEFAULT="$WORKSPACE_DIR/HTo2LongLivedTo4mu_MH-125_MFF-12_CTau-900mm_TuneCP5_14TeV-pythia8_L1NanoWithGenPropagated_20260212.root"
-OUT_PREFIX_DEFAULT="$EMELETRIGGER_DIR/datasets/l1nano_evt0"
+OUT_PREFIX_DEFAULT="/eos/user/e/eallergu/GNN/L1Nano_GenParticlePropagator/CMSSW_15_1_0_pre4/src/test/datasets/l1nano_evt0"
 
 if [ ! -f "$ROOT_FILE_DEFAULT" ]; then
   shopt -s nullglob
@@ -41,14 +41,14 @@ MPLBACKEND=Agg "${PYTHON_CMD[@]}" "$SCRIPT_DIR/InputDataset.py" \
   --tree_name Events \
   --max_files 1 \
   --max_events "$MAX_EVENTS" \
-  --inspect_event \
-  --max_print_stubs 10 \
-  --max_print_edges 12 \
-  --plot_stub_edge_info \
-  --plot_example \
-  --show_edge_attr_labels \
-  --plot_idx "$PLOT_IDX" \
-  --plot_output_prefix "$OUT_PREFIX"
+  --plot_example 
+  ##--inspect_event \
+  ##--max_print_stubs 10 \
+  ##--max_print_edges 12 \
+  ##--plot_stub_edge_info \
+  ##--show_edge_attr_labels \
+  ##--plot_idx "$PLOT_IDX" \
+  ##--plot_output_prefix "$OUT_PREFIX"
 
 echo "Done. Output files:"
 echo "  ${OUT_PREFIX}_stub_edge.png"
