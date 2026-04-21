@@ -1,4 +1,5 @@
 import os
+import glob
 import uproot
 import torch
 import warnings
@@ -96,6 +97,64 @@ class L1NanoDataset(Dataset):
         For L1Nano, we mostly work with stub and GenPart info directly.
         """
         return arr
+
+    def resolve_inputs(self, inputs=None):
+        """
+        Resolve input source(s) to a flat list of absolute ROOT file paths.
+
+        Supported inputs:
+            - single file path
+            - directory path
+            - glob pattern
+            - list mixing any of the above
+        """
+        source = self.root_dir if inputs is None else inputs
+
+        def _resolve(item):
+            if isinstance(item, (list, tuple)):
+                files = []
+                for sub_item in item:
+                    files.extend(_resolve(sub_item))
+                return files
+
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"Unsupported input type: {type(item).__name__}. "
+                    "Expected str, list, or tuple."
+                )
+
+            absolute_path = os.path.abspath(item)
+
+            if os.path.isdir(absolute_path):
+                pattern = os.path.join(absolute_path, "*.root")
+                return sorted(glob.glob(pattern))
+
+            if os.path.isfile(absolute_path):
+                return [absolute_path] if absolute_path.endswith(".root") else []
+
+            return sorted(glob.glob(absolute_path))
+
+        resolved = _resolve(source)
+
+        # Keep only ROOT files and remove duplicates while preserving order.
+        root_files = []
+        seen = set()
+        for path in resolved:
+            if not path.endswith(".root"):
+                continue
+            norm_path = os.path.abspath(path)
+            if norm_path not in seen:
+                seen.add(norm_path)
+                root_files.append(norm_path)
+
+        if self.max_files is not None and self.max_files > 0:
+            root_files = root_files[:self.max_files]
+
+        if not root_files:
+            raise FileNotFoundError(f"No .root file(s) found for input: {source}")
+
+        return root_files
+
     
     def load_data_from_root(self):
         """
@@ -110,13 +169,7 @@ class L1NanoDataset(Dataset):
         events_skipped_nan = 0
         events_skipped_pretransform = 0
 
-        # Check if root_dir is a directory or a file
-        if os.path.isdir(self.root_dir):
-            root_files = [os.path.join(self.root_dir, f) for f in os.listdir(self.root_dir) if f.endswith(".root")]
-        elif os.path.isfile(self.root_dir) and self.root_dir.endswith(".root"):
-            root_files = [self.root_dir]
-        else:
-            raise ValueError(f"{self.root_dir} is not a valid directory or ROOT file")
+        root_files = self.resolve_inputs()
 
         # Define canonical branches and resolve to real branch names through aliases.
         stub_branches = [f"stub_{var}" for var in self.stub_vars]
@@ -153,8 +206,6 @@ class L1NanoDataset(Dataset):
 
         for root_file in root_files:
             print(f"Processing file: {root_file}")
-            if self.max_files is not None and files_processed >= self.max_files:
-                break
             
             try:
                 file = uproot.open(root_file)
@@ -230,6 +281,7 @@ class L1NanoDataset(Dataset):
             except Exception as e:
                 print(f"  Error processing file {root_file}: {e}")
                 continue
+        print(f"Finished processing {files_processed} file(s)")
         
         print(f"\nTotal events loaded: {len(data_list)}")
         if self.debug:
