@@ -1,0 +1,22 @@
+tree_name: "Events"
+
+stub_prefix: "MuonStubTps_"
+genpart_prefix: "GenMuon_"
+
+# VARS
+# canonical_name: source_branch_suffix
+stub_vars:
+  tfLayer: "tfLayer"
+  offeta1: "offlineEta1"
+  offphi1: "offlineCoord1"
+
+genpart_vars:
+  pt: "pt"
+  eta: "eta"
+  phi: "phi"
+  pdgId: "pdgId"
+  dXY: "dXY"
+  lXY: "lXY"
+  etaSt2: "etaSt2"
+  phiSt2: "phiSt2"
+  status: "status"

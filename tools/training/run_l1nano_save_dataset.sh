@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EMELETRIGGER_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 echo " Script Directory :       $SCRIPT_DIR"

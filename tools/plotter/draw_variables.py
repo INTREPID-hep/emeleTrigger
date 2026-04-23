@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+#!/usr/bin/env python3
+import argparse
 import os
 from pathlib import Path
 
@@ -60,6 +62,12 @@ def draw_single_vars(inputfile, outputfolder, treename, plots, cutname=""):
     ROOT = get_root_module()
     root_file = ROOT.TFile(inputfile)
     tree = root_file.Get(treename)
+def draw_single_vars(inputfile, outputfolder, treename, plots, cutname=""):
+    assert os.path.isfile(inputfile), print("File is does not exist")
+
+    ROOT = get_root_module()
+    root_file = ROOT.TFile(inputfile)
+    tree = root_file.Get(treename)
 
     if plots == "all":
         plot_list = []
@@ -68,11 +76,27 @@ def draw_single_vars(inputfile, outputfolder, treename, plots, cutname=""):
                 continue
             if "killed" in branch.GetName():
                 continue
+            if "hits" in branch.GetName():
+                continue
+            if "killed" in branch.GetName():
+                continue
             plot_list.append(branch.GetName())
     else:
         plot_list = plots.split(",")
+        plot_list = plots.split(",")
 
     for plot in plot_list:
+        canvas = ROOT.TCanvas()
+        tree.Draw(plot, cutname)
+        canvas.SaveAs(os.path.join(outputfolder, plot + ".png"))
+
+
+def draw_correlations(inputfile, outputfolder, treename, cutname=""):
+    assert os.path.isfile(inputfile), print("File is does not exist")
+
+    ROOT = get_root_module()
+    root_file = ROOT.TFile(inputfile)
+    tree = root_file.Get(treename)
         canvas = ROOT.TCanvas()
         tree.Draw(plot, cutname)
         canvas.SaveAs(os.path.join(outputfolder, plot + ".png"))

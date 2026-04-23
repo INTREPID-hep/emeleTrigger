@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 
 import yaml
 
+import json
+
 ## ## ## ## Leyenda ## ## ## ##
 
 ### Dudas
@@ -59,11 +61,10 @@ class L1NanoDataset(Dataset):
                 print(f"Setting {key} from config file: {value}")
                 kwargs[key] = value
 
-        self.root_dir      = kwargs.get("root_dir")
-        self.tree_name     = kwargs.get("tree_name", "Events")
-        self.stub_prefix   = kwargs.get("stub_prefix", "stub_")
+        self.root_dir       = kwargs.get("root_dir")
+        self.tree_name      = kwargs.get("tree_name", "Events")
+        self.stub_prefix    = kwargs.get("stub_prefix", "stub_")
         self.genpart_prefix = kwargs.get("genpart_prefix", "GenPart_")
-        
         # Definir features de stubs y GenPart
         default_stub_vars = [
             'tfLayer', 'offeta1', 'offphi1'
@@ -87,6 +88,7 @@ class L1NanoDataset(Dataset):
         self.max_files     = kwargs.get("max_files", None)
         self.max_events    = kwargs.get("max_events", None)
         self.debug         = kwargs.get("debug", False)
+        self.do_batches    = kwargs.get("do_batches", False)
         self.edge_deta_threshold = kwargs.get("edge_deta_threshold", 0.5)
         self.edge_dphi_threshold = kwargs.get("edge_dphi_threshold", 1.0)
         self.pre_transform = kwargs.get("pre_transform")
@@ -175,7 +177,11 @@ class L1NanoDataset(Dataset):
         events_skipped_nan = 0
         events_skipped_pretransform = 0
 
-        root_files = self.resolve_inputs()
+        if self.do_batches:
+
+            root_files = sorted(json.loads(self.root_dir))
+        else:
+            root_files = self.resolve_inputs()
 
         # Define canonical branches and resolve to real branch names through aliases.
         stub_branches = [f"stub_{var}" for var in self.stub_vars]
@@ -211,6 +217,7 @@ class L1NanoDataset(Dataset):
             arrays_kwargs["aliases"] = aliases
 
         for root_file in root_files:
+            counter = 1
             print(f"Processing file: {root_file}")
             
             try:
@@ -284,7 +291,10 @@ class L1NanoDataset(Dataset):
                     
                     if self.debug and events_processed % 100 == 0:
                         print(f"  Processed {events_processed} events")
-                
+                    if counter == 1:
+                        print("labels", graph_data.y)
+                        counter += 1
+                        
                 files_processed += 1
                 file.close()
                 
@@ -628,6 +638,7 @@ class L1NanoDataset(Dataset):
         print("data.y.shape    = ", data.y.shape)
         #labels = {i: int(data.x[i, 3].item()) for i in range(data.x.shape[0])}
         labels = {i: int(data.y[i].item()) for i in range(data.y.shape[0])}
+        print("labels = ", labels)
 
         '''G = nx.Graph()
         
@@ -740,6 +751,7 @@ def main():
     parser.add_argument('--load_path', type=str, help='Path to load the dataset')
     parser.add_argument('--max_files', type=int, help='Maximum number of files to process')
     parser.add_argument('--max_events', type=int, help='Maximum number of events to process')
+    parser.add_argument('--do_batches', action='store_true', help='Process data in batches for condor jobs')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
 
