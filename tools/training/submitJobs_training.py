@@ -2,39 +2,54 @@
 import os,sys
 
 print('Start\n')
-########   customization  area #########
-queue = 'longlunch' # give bsub queue -- 8nm (8 minutes), 1nh (1 hour), 8nh, 1nd (1day), 2nd, 1nw (1 week), 2nw
-WorkDir = '/afs/cern.ch/user/e/eallergu/workdir/GNN/tmp/EdgeClassifier/Training'
+########   Customization  area #########
+queue      = 1                                                                               # Number of instances of the job to be sent (default = 1). (¿Se está usando?)
+JobFlavour = 'longlunch'                                                                     # e.g. expresso, microcentury, longlunch, workday, tomorrow -> up to 48 hours  (¿Se puede usar o es solo CERN?)
 
-ConfigPath = '/eos/user/e/eallergu/GNN/L1Nano_GenParticlePropagator/CMSSW_15_1_0_pre4/src/emeleTrigger/configs/'
+WorkDir = '/lhome/ext/uovi156/uovi1564/workdir/Training/SAGE/Random'                           # Work directory (path) where the .log, .out and .err files will be stored.
+
+ConfigPath = '/lhome/ext/uovi156/uovi1564/emeleTrigger/configs/'                             # Path to the configuration file.
 ConfigFile = 'training_edge_classification.yml'
+########   Customization end   #########
 
-########   customization end   #########
+
+########   Work directory   #########
 path = os.getcwd()
 print('Do not worry about folder creation:\n')
+
+
+### Work directory
+print('The Work Directory will be overwritten.\n')
 os.system("rm -rf %s" %(WorkDir))
 os.system("mkdir %s" %(WorkDir))
 os.system("mkdir %s/exec" %(WorkDir))
 os.system("mkdir %s/batchlogs" %(WorkDir))
 
-config_name = ConfigFile.split('.')[0]
 
-##### creating job #####
+########   Creating job   #########
+config_name = ConfigFile.split('.')[0]
 with open("%s/exec/job_%s.sh" %(WorkDir, config_name), 'w') as fout:
     fout.write("#!/bin/sh\n")
     fout.write("echo\n")
     fout.write("echo\n")
+    fout.write("echo 'GPU info'\n")
+    fout.write("nvidia-smi\n")
     fout.write("echo 'START---------------'\n")
+    fout.write("start=$(date +%s)\n")
     fout.write("echo 'Work Directory ' ${PWD}\n")
     fout.write("cd "+str(path)+"\n")
     fout.write("source /cvmfs/sft.cern.ch/lcg/views/LCG_106_cuda/x86_64-el9-gcc11-opt/setup.sh\n")
+    fout.write("nvidia-smi\n")
     fout.write("python TrainEdgeClassificationFromGraph.py --config %s --do_train\n" %(ConfigPath+ConfigFile))  
+    fout.write("end=$(date +%s)\n")
+    fout.write('echo "Total time: $((end - start)) seconds"\n')
     fout.write("echo 'STOP---------------'\n")
     fout.write("echo\n")
     fout.write("echo\n")
 os.system("chmod 755 %s/exec/job_%s.sh" %(WorkDir, config_name))
 
-###### create submit.sub file ####
+
+########   Creating submit.sub file   #########
 with open('%s/submit.sub' %(WorkDir), 'w') as fout:
     fout.write("executable              = $(filename)\n")
     fout.write("arguments               = $(ClusterId)$(ProcId)\n")
@@ -42,11 +57,13 @@ with open('%s/submit.sub' %(WorkDir), 'w') as fout:
     fout.write("error                   = %s/batchlogs/$(ClusterId).$(ProcId).err\n"    %(WorkDir))
     fout.write("log                     = %s/batchlogs/$(ClusterId).log\n"             %(WorkDir))
     fout.write("request_gpus            = 1\n")
-    fout.write('+JobFlavour = "%s"\n' %(queue))
+    fout.write('requirements            = (TARGET.GPUs_DeviceName != "NVIDIA A100-SXM4-40GB") && (TARGET.GPUs_DeviceName != "NVIDIA A100-PCIE-40GB")\n')
+    #fout.write("+UseNvidiaH100 = True\n")
     fout.write("\n")
     fout.write("queue filename matching (%s/exec/job_*sh)\n" %(WorkDir))
 
-###### sends bjobs ######
+
+########   Send bjobs   #########
 print()
 print("### To submit all jobs do: ")
 print("....................................................................")

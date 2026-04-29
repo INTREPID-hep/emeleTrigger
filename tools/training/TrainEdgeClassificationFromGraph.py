@@ -29,73 +29,7 @@ from torch_geometric.transforms import Compose
 
 from transformations import NormalizeEdgeFeatures, NormalizeNodeFeatures
 
-
-class EdgeClassifierGNN(nn.Module):
-    def __init__(self, in_channels, edge_in_channels, hidden_dim=64, model_type="SAGE", dropout=0.2):
-        super().__init__()
-        self.model_type = model_type.upper()
-        self.dropout = dropout
-
-        if self.model_type == "GCN":
-            self.conv1 = GCNConv(in_channels, hidden_dim)
-            self.conv2 = GCNConv(hidden_dim, hidden_dim)
-            self.conv3 = GCNConv(hidden_dim, hidden_dim)
-        elif self.model_type == "TransformerConv":
-            self.conv1 = TransformerConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels, heads=4, concat=False)
-            self.conv2 = TransformerConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
-            self.conv3 = TransformerConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
-        elif self.model_type == "SAGE":
-            self.conv1 = SAGEConv(in_channels, hidden_dim)
-            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
-            self.conv3 = SAGEConv(hidden_dim, hidden_dim)
-        elif self.model_type == "SAGEUpgrade":
-            self.conv1 = SAGEConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels)
-            self.conv2 = SAGEConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels)
-            self.conv3 = SAGEConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels)
-        else:
-            self.conv1 = SAGEConv(in_channels, hidden_dim)
-            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
-            self.conv3 = SAGEConv(hidden_dim, hidden_dim)
-
-        edge_mlp_in = 2 * hidden_dim + edge_in_channels
-        self.edge_mlp = nn.Sequential(
-            nn.Linear(edge_mlp_in, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Linear(hidden_dim // 2, 1),
-        )
-
-    def forward(self, data):
-        x = data.x.float()
-        edge_index = data.edge_index
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
-
-        src, dst = edge_index
-        x_src = x[src]
-        x_dst = x[dst]
-
-        if hasattr(data, "edge_attr") and data.edge_attr is not None and data.edge_attr.numel() > 0:
-            edge_attr = data.edge_attr.float()
-            edge_feat = torch.cat([x_src, x_dst, edge_attr], dim=1)
-        else:
-            edge_feat = torch.cat([x_src, x_dst], dim=1)
-
-        logits = self.edge_mlp(edge_feat).squeeze(-1)
-        return logits
-
+from models import EdgeClassifierGCN, EdgeClassifierSAGE, EdgeClassifierTransformerConv, EdgeClassifierSAGEUpgrade
 
 class TrainEdgeClassificationFromGraph:
     def __init__(self, **kwargs):
@@ -134,7 +68,8 @@ class TrainEdgeClassificationFromGraph:
         self.do_validation = kwargs.get("do_validation", False)
         self.do_test = kwargs.get("do_test", False)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() and self.device_str == "cuda" else "cpu")
+        self.device = torch.device(self.device_str)
+
 
         self.transform = self._build_transform(self.normalization)
         self.model = None
@@ -288,13 +223,14 @@ class TrainEdgeClassificationFromGraph:
         if hasattr(sample_batch, "edge_attr") and sample_batch.edge_attr is not None:
             edge_in_channels = sample_batch.edge_attr.shape[1]
 
-        self.model = EdgeClassifierGNN(
-            in_channels=in_channels,
-            edge_in_channels=edge_in_channels,
-            hidden_dim=self.hidden_dim,
-            model_type=self.model_type,
-            dropout=self.dropout,
-        ).to(self.device)
+        if self.model_type =="GCN":
+            self.model = EdgeClassifierGCN(in_channels=in_channels, edge_in_channels=edge_in_channels, hidden_dim=self.hidden_dim, model_type=self.model_type, dropout=self.dropout,).to(self.device)
+        elif self.model_type =="SAGE":
+            self.model = EdgeClassifierSAGE(in_channels=in_channels, edge_in_channels=edge_in_channels, hidden_dim=self.hidden_dim, model_type=self.model_type, dropout=self.dropout,).to(self.device)
+        elif self.model_type =="TransformerConv":
+            self.model = EdgeClassifierTransformerConv(in_channels=in_channels, edge_in_channels=edge_in_channels, hidden_dim=self.hidden_dim, model_type=self.model_type, dropout=self.dropout,).to(self.device)
+        elif self.model_type =="SAGEUpgrade":
+            self.model = EdgeClassifierSAGEUpgrade(in_channels=in_channels, edge_in_channels=edge_in_channels, hidden_dim=self.hidden_dim, model_type=self.model_type, dropout=self.dropout,).to(self.device)
 
         pos_weight = self._compute_pos_weight()
         pos_weight_tensor = torch.tensor([pos_weight], dtype=torch.float32, device=self.device)
@@ -306,6 +242,13 @@ class TrainEdgeClassificationFromGraph:
         )
 
         print(f"Device: {self.device}")
+        print(f"Cuda availability: {torch.cuda.is_available()}")
+        print("Cuda Information:")
+        print(f"Version: {torch.version.cuda}")
+        print(f"Device name: {torch.cuda.get_device_name(0)}")
+        print(f"(Self)Device name: {torch.cuda.get_device_name(self.device)}")
+        print(f"Device capability: {torch.cuda.get_device_capability(0)}")
+        print(f"Version: {torch.version.cuda}")
         print(f"Model type: {self.model_type}")
         print(f"Positive class weight: {pos_weight:.4f}")
 
@@ -617,7 +560,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--earlystop", type=int, default=10)
-    parser.add_argument("--model_type", type=str, default="SAGE", help="SAGE or GCN")
+    parser.add_argument("--model_type", type=str, default="SAGE", help="Model for training")
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--normalization", type=str, default="NodesAndEdges", help="None, Nodes, Edges, NodesAndEdges")
@@ -627,7 +570,8 @@ def parse_args():
     parser.add_argument("--val_ratio", type=float, default=0.15)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--pos_weight", type=str, default="auto", help="auto or numeric value")
-    parser.add_argument("--device", type=str, default="cuda")
+    #parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_validation", action="store_true")

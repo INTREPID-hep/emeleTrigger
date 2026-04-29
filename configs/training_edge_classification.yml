@@ -1,4 +1,4 @@
-model_type: "SAGE"
+model_type: "GCN"
 hidden_dim: 64
 dropout: 0.2
 normalization: "NodesAndEdges"
@@ -18,10 +18,10 @@ seed: 42
 task: "edge_classification"
 device: "cuda"
 
-graph_path: "./datasets/"
-graph_name: "l1nano_dataaset_5k.pt"
-out_model_path: "./results_edge_cls"
-save_tag: "edge_cls_l1nano_5k"
+graph_path: "/lustre/ific.uv.es/ml/uovi156/data/graphs/l1nano_graphs_prod/S1"
+graph_name: "l1nano_dataset_1.pt"
+out_model_path: "/lhome/ext/uovi156/uovi1564/results_edge_cls/S1"
+save_tag: "edge_cls_GCN_50epochs"
 
 num_files: 1
 do_train: true

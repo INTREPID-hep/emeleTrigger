@@ -1,5 +1,6 @@
 # models.py
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_max_pool, global_mean_pool
 
@@ -200,3 +201,201 @@ class EdgeGNNClassifier(nn.Module):
 
         # 4. Clasificador: logit por arista
         return self.edge_mlp(edge_feat).view(-1)
+
+##### Edge Classifiers #####
+
+class EdgeClassifierGCN(nn.Module):
+    def __init__(self, in_channels, edge_in_channels, hidden_dim=64, model_type="SAGE", dropout=0.2):
+        super().__init__()
+        self.dropout = dropout
+
+        self.conv1 = GCNConv(in_channels, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        
+
+        edge_mlp_in = 2 * hidden_dim + edge_in_channels
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(edge_mlp_in, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv3(x, edge_index)
+        x = F.relu(x)
+
+        src, dst = edge_index
+        x_src = x[src]
+        x_dst = x[dst]
+
+        if hasattr(data, "edge_attr") and data.edge_attr is not None and data.edge_attr.numel() > 0:
+            edge_attr = data.edge_attr.float()
+            edge_feat = torch.cat([x_src, x_dst, edge_attr], dim=1)
+        else:
+            edge_feat = torch.cat([x_src, x_dst], dim=1)
+
+        logits = self.edge_mlp(edge_feat).squeeze(-1)
+        return logits
+
+
+class EdgeClassifierSAGE(nn.Module):
+    def __init__(self, in_channels, edge_in_channels, hidden_dim=64, model_type="SAGE", dropout=0.2):
+        super().__init__()
+        self.dropout = dropout
+
+        self.conv1 = SAGEConv(in_channels, hidden_dim)
+        self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+        self.conv3 = SAGEConv(hidden_dim, hidden_dim)
+
+        edge_mlp_in = 2 * hidden_dim + edge_in_channels
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(edge_mlp_in, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv3(x, edge_index)
+        x = F.relu(x)
+
+        src, dst = edge_index
+        x_src = x[src]
+        x_dst = x[dst]
+
+        if hasattr(data, "edge_attr") and data.edge_attr is not None and data.edge_attr.numel() > 0:
+            edge_attr = data.edge_attr.float()
+            edge_feat = torch.cat([x_src, x_dst, edge_attr], dim=1)
+        else:
+            edge_feat = torch.cat([x_src, x_dst], dim=1)
+
+        logits = self.edge_mlp(edge_feat).squeeze(-1)
+        return logits
+
+
+class EdgeClassifierTransformerConv(nn.Module):
+    def __init__(self, in_channels, edge_in_channels, hidden_dim=64, model_type="SAGE", dropout=0.2):
+        super().__init__()
+        self.dropout = dropout
+
+        self.conv1 = TransformerConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels, heads=4, concat=False)
+        self.conv2 = TransformerConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
+        self.conv3 = TransformerConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels, heads=4, concat=False)
+
+        edge_mlp_in = 2 * hidden_dim + edge_in_channels
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(edge_mlp_in, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv3(x, edge_index)
+        x = F.relu(x)
+
+        src, dst = edge_index
+        x_src = x[src]
+        x_dst = x[dst]
+
+        if hasattr(data, "edge_attr") and data.edge_attr is not None and data.edge_attr.numel() > 0:
+            edge_attr = data.edge_attr.float()
+            edge_feat = torch.cat([x_src, x_dst, edge_attr], dim=1)
+        else:
+            edge_feat = torch.cat([x_src, x_dst], dim=1)
+
+        logits = self.edge_mlp(edge_feat).squeeze(-1)
+        return logits
+
+
+class EdgeClassifierSAGEUpgrade(nn.Module):
+    def __init__(self, in_channels, edge_in_channels, hidden_dim=64, model_type="SAGE", dropout=0.2):
+        super().__init__()
+        self.dropout = dropout
+
+        self.conv1 = SAGEConv(in_channels, hidden_dim*2, edge_dim=edge_in_channels)
+        self.conv2 = SAGEConv(hidden_channels*2, hidden_dim, edge_dim=edge_in_channels)
+        self.conv3 = SAGEConv(hidden_channels, hidden_dim, edge_dim=edge_in_channels)
+        
+        edge_mlp_in = 2 * hidden_dim + edge_in_channels
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(edge_mlp_in, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        x = self.conv3(x, edge_index)
+        x = F.relu(x)
+
+        src, dst = edge_index
+        x_src = x[src]
+        x_dst = x[dst]
+
+        if hasattr(data, "edge_attr") and data.edge_attr is not None and data.edge_attr.numel() > 0:
+            edge_attr = data.edge_attr.float()
+            edge_feat = torch.cat([x_src, x_dst, edge_attr], dim=1)
+        else:
+            edge_feat = torch.cat([x_src, x_dst], dim=1)
+
+        logits = self.edge_mlp(edge_feat).squeeze(-1)
+        return logits
